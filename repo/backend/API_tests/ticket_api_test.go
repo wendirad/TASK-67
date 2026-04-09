@@ -10,8 +10,8 @@ import (
 func TestCreateTicket(t *testing.T) {
 	c := getAdminClient(t)
 	resp := c.post("/api/tickets", map[string]interface{}{
+		"type":        "general",
 		"subject":     "Test Ticket",
-		"category":    "general",
 		"priority":    "medium",
 		"description": "This is a test ticket",
 	})

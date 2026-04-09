@@ -60,9 +60,9 @@ func (rl *rateLimiter) cleanup() {
 	}
 }
 
-// RateLimit applies per-IP rate limiting: 100 requests per minute.
+// RateLimit applies per-IP rate limiting: 500 requests per minute.
 func RateLimit() gin.HandlerFunc {
-	limiter := newRateLimiter(100, time.Minute)
+	limiter := newRateLimiter(500, time.Minute)
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		if !limiter.allow(ip) {

@@ -9,8 +9,8 @@ import (
 func TestCreatePost(t *testing.T) {
 	c := getAdminClient(t)
 	resp := c.post("/api/posts", map[string]interface{}{
-		"title": "Test Post",
-		"body":  "This is a test post body.",
+		"title":   "Test Post",
+		"content": "This is a test post body.",
 	})
 	if resp.Code != 201 {
 		t.Fatalf("Create post failed: %d %s", resp.Code, resp.Msg)

@@ -41,7 +41,7 @@ echo "--- Starting backend and worker ---"
 docker compose up -d backend worker
 echo "Waiting for backend to be ready..."
 RETRIES=30
-until docker compose exec -T backend wget -q --spider http://localhost:8080/api/health 2>/dev/null; do
+until docker compose exec -T backend wget -q -O /dev/null http://localhost:8080/api/health 2>/dev/null; do
     RETRIES=$((RETRIES - 1))
     if [ $RETRIES -le 0 ]; then
         echo "FAIL: Backend did not become ready"

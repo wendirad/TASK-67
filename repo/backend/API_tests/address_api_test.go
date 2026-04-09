@@ -12,12 +12,13 @@ func TestAddressCRUD(t *testing.T) {
 
 	// Create address
 	createResp := c.post("/api/addresses", map[string]interface{}{
-		"recipient":   "Test Recipient",
-		"phone":       "13800138000",
-		"line1":       "123 Test Street",
-		"city":        "Beijing",
-		"province":    "Beijing",
-		"postal_code": "100000",
+		"label":          "Home",
+		"recipient_name": "Test Recipient",
+		"phone":          "13800138000",
+		"address_line1":  "123 Test Street",
+		"city":           "Beijing",
+		"province":       "Beijing",
+		"postal_code":    "100000",
 	})
 	if createResp.Code != 201 {
 		t.Fatalf("Create address failed: %d %s", createResp.Code, createResp.Msg)
@@ -39,9 +40,13 @@ func TestAddressCRUD(t *testing.T) {
 
 	// Update address
 	updateResp := c.put("/api/addresses/"+addr.ID, map[string]interface{}{
-		"recipient": "Updated Recipient",
-		"line1":     "456 Updated Street",
-		"city":      "Shanghai",
+		"label":          "Office",
+		"recipient_name": "Updated Recipient",
+		"phone":          "13800138000",
+		"address_line1":  "456 Updated Street",
+		"city":           "Shanghai",
+		"province":       "Shanghai",
+		"postal_code":    "200000",
 	})
 	if updateResp.Code != 200 {
 		t.Fatalf("Update address failed: %d %s", updateResp.Code, updateResp.Msg)
