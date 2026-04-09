@@ -26,25 +26,27 @@ A production-ready, full-stack platform for campus recreation management. Campus
 
 ```
 repo/
+  go.mod                     # Go module (campusrec)
+  go.sum                     # Go dependency checksums
+  cmd/
+    server/main.go           # API server entrypoint
+    worker/main.go           # Background worker entrypoint
+  internal/
+    config/                  # Configuration loading from env + secrets
+    database/                # Connection, migrations, migration SQL files
+    handlers/                # HTTP request handlers (API + page rendering)
+    middleware/               # Auth, RBAC, CORS, rate limiting
+    models/                  # Domain structs
+    repository/              # Database access layer
+    services/                # Business logic layer
+    templates/               # Server-side HTML templates (layouts + pages)
+    worker/                  # Scheduler and job infrastructure
+  unit_tests/                # Unit tests (no DB required)
+  API_tests/                 # Integration tests (run against live backend)
   backend/
-    cmd/
-      server/main.go        # API server entrypoint
-      worker/main.go         # Background worker entrypoint
-    internal/
-      config/                # Configuration loading from env + secrets
-      database/              # Connection, migrations, migration SQL files
-      handlers/              # HTTP request handlers (API + page rendering)
-      middleware/             # Auth, RBAC, CORS, rate limiting
-      models/                # Domain structs
-      repository/            # Database access layer
-      services/              # Business logic layer
-      templates/             # Server-side HTML templates (layouts + pages)
-      worker/                # Scheduler and job infrastructure
-    unit_tests/              # Unit tests (no DB required)
-    API_tests/               # Integration tests (run against live backend)
-    entrypoint.sh            # Container entrypoint (loads secrets, runs migrations)
     Dockerfile               # Production multi-stage build
     Dockerfile.test          # Test runner image
+    entrypoint.sh            # Container entrypoint (loads secrets, runs migrations)
   frontend/
     nginx.conf               # Reverse proxy config
     static/                  # Static assets

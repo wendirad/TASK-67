@@ -25,7 +25,9 @@ services:
       retries: 5
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8080:8080"
     environment:
@@ -47,7 +49,9 @@ services:
     command: ["server"]
 
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       SECRETS_PATH: /run/secrets
       DB_HOST: db
@@ -76,8 +80,8 @@ services:
 
   test-runner:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.test
+      context: .
+      dockerfile: backend/Dockerfile.test
     environment:
       SECRETS_PATH: /run/secrets
       DB_HOST: db
