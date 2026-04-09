@@ -1,0 +1,44 @@
+package templates
+
+templ SessionDetailPage() {
+	@Base("Session", true) {
+		<div>
+			<div class="mb-4"><a href="/catalog" class="text-indigo-600 hover:text-indigo-800 text-sm">&#8592; Back to Catalog</a></div>
+			<div id="session-detail"><div class="skeleton h-64 rounded-lg"></div></div>
+		</div>
+		<script>
+		async function loadSession() {
+			const id = window.location.pathname.split('/').pop();
+			const res = await api(`/api/sessions/${id}`);
+			if (!res) return;
+			const s = res.data;
+			document.getElementById('session-detail').innerHTML = `
+				<div class="bg-white rounded-lg shadow p-6">
+					<div class="flex justify-between items-start mb-4">
+						<h1 class="text-2xl font-bold">${s.title}</h1>
+						${statusBadge(s.status)}
+					</div>
+					<p class="text-gray-700 mb-4">${s.description || 'No description'}</p>
+					<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-6">
+						<div><strong class="text-gray-500">Facility</strong><p>${s.facility_name || 'N/A'}</p></div>
+						<div><strong class="text-gray-500">Start</strong><p>${formatDateTime(s.start_time)}</p></div>
+						<div><strong class="text-gray-500">End</strong><p>${formatDateTime(s.end_time)}</p></div>
+						<div><strong class="text-gray-500">Available Seats</strong><p>${s.available_seats != null ? s.available_seats + ' / ' + s.total_seats : 'N/A'}</p></div>
+					</div>
+					${s.coach_name ? `<p class="text-sm text-gray-600 mb-4">Coach: ${s.coach_name}</p>` : ''}
+					${s.status === 'open' && s.available_seats > 0 ? `
+						<button onclick="registerSession('${s.id}')" id="reg-btn" class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Register</button>
+					` : s.status === 'open' && s.available_seats === 0 ? `
+						<p class="text-yellow-600 font-medium">Session is full. You may be placed on the waitlist.</p>
+						<button onclick="registerSession('${s.id}')" id="reg-btn" class="mt-2 px-6 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700">Join Waitlist</button>
+					` : ''}
+				</div>`;
+		}
+		async function registerSession(sessionId) {
+			const res = await apiSubmit('/api/registrations', { session_id: sessionId }, document.getElementById('reg-btn'), 'Register');
+			if (res) window.location.href = '/registrations';
+		}
+		loadSession();
+		</script>
+	}
+}

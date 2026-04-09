@@ -12,10 +12,11 @@ import (
 type TicketService struct {
 	ticketRepo *repository.TicketRepository
 	userRepo   *repository.UserRepository
+	auditRepo  *repository.AuditRepository
 }
 
-func NewTicketService(ticketRepo *repository.TicketRepository, userRepo *repository.UserRepository) *TicketService {
-	return &TicketService{ticketRepo: ticketRepo, userRepo: userRepo}
+func NewTicketService(ticketRepo *repository.TicketRepository, userRepo *repository.UserRepository, auditRepo *repository.AuditRepository) *TicketService {
+	return &TicketService{ticketRepo: ticketRepo, userRepo: userRepo, auditRepo: auditRepo}
 }
 
 // CreateTicket creates a ticket with SLA deadlines.
@@ -81,6 +82,12 @@ func (s *TicketService) CreateTicket(userID, ticketType, subject, description, p
 	}
 
 	log.Printf("Ticket created: %s type=%s user=%s", ticket.TicketNumber, ticketType, userID)
+
+	newVal := fmt.Sprintf(`{"ticket_number":"%s","type":"%s","priority":"%s","status":"open"}`, ticket.TicketNumber, ticketType, priority)
+	if err := s.auditRepo.Log("ticket", ticket.ID, "ticket_created", nil, &newVal, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for ticket %s: %v", ticket.ID, err)
+	}
+
 	return ticket, 201, ""
 }
 
@@ -155,6 +162,12 @@ func (s *TicketService) AssignTicket(ticketID, assignedTo string) (int, string) 
 	}
 
 	log.Printf("Ticket assigned: %s to=%s", ticket.TicketNumber, assignedTo)
+
+	newVal := fmt.Sprintf(`{"assigned_to":"%s"}`, assignedTo)
+	if err := s.auditRepo.Log("ticket", ticketID, "ticket_assigned", nil, &newVal, assignedTo, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for ticket assignment %s: %v", ticketID, err)
+	}
+
 	return 200, ""
 }
 
@@ -200,6 +213,13 @@ func (s *TicketService) UpdateTicketStatus(ticketID, userID, role, newStatus str
 	}
 
 	log.Printf("Ticket status updated: %s %s→%s by=%s", ticket.TicketNumber, ticket.Status, newStatus, userID)
+
+	oldVal := fmt.Sprintf(`{"status":"%s"}`, ticket.Status)
+	newValStr := fmt.Sprintf(`{"status":"%s"}`, newStatus)
+	if err := s.auditRepo.Log("ticket", ticketID, "ticket_status_updated", &oldVal, &newValStr, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for ticket status %s: %v", ticketID, err)
+	}
+
 	return 200, ""
 }
 

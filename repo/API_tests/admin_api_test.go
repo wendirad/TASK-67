@@ -112,38 +112,4 @@ func TestAdminListAuditLogs(t *testing.T) {
 	}
 }
 
-func TestAdminListBackups(t *testing.T) {
-	c := getAdminClient(t)
-	resp := c.get("/api/admin/backups")
-	if resp.Code != 200 {
-		t.Fatalf("List backups failed: %d %s", resp.Code, resp.Msg)
-	}
-}
-
-func TestAdminRestoreTargets(t *testing.T) {
-	c := getAdminClient(t)
-	resp := c.get("/api/admin/backup/restore-targets")
-	if resp.Code != 200 {
-		t.Fatalf("Restore targets failed: %d %s", resp.Code, resp.Msg)
-	}
-}
-
-func TestAdminArchiveStatus(t *testing.T) {
-	c := getAdminClient(t)
-	resp := c.get("/api/admin/archive/status")
-	if resp.Code != 200 {
-		t.Fatalf("Archive status failed: %d %s", resp.Code, resp.Msg)
-	}
-}
-
-func TestAdminRestoreRequiresConfirmation(t *testing.T) {
-	c := getAdminClient(t)
-	resp := c.post("/api/admin/backup/restore", map[string]interface{}{
-		"restore_type":       "snapshot",
-		"backup_id":          "00000000-0000-0000-0000-000000000000",
-		"confirmation_token": "WRONG",
-	})
-	if resp.Code == 202 {
-		t.Fatal("Expected restore to fail without correct confirmation token")
-	}
-}
+// Backup, restore, and archive tests are in backup_api_test.go

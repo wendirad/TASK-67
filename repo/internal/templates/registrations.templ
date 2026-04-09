@@ -1,0 +1,52 @@
+package templates
+
+templ RegistrationsPage() {
+	@Base("Registrations", true) {
+		<div>
+			<h1 class="text-2xl font-bold text-gray-900 mb-6">My Registrations</h1>
+			<div id="reg-list">
+				<div class="skeleton h-16 rounded mb-2"></div>
+				<div class="skeleton h-16 rounded mb-2"></div>
+			</div>
+			<div id="reg-pagination"></div>
+		</div>
+		<script>
+		async function loadRegistrations(page) {
+			const res = await api(`/api/registrations?page=${page || 1}&page_size=20`);
+			if (!res) return;
+			const items = res.data?.items || [];
+			const el = document.getElementById('reg-list');
+			if (!items.length) { el.innerHTML = '<p class="text-gray-500 py-4">No registrations found. <a href="/catalog" class="text-indigo-600">Browse sessions</a></p>'; return; }
+			el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-hidden"><table class="min-w-full divide-y divide-gray-200">
+				<thead class="bg-gray-50"><tr>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Session</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+				</tr></thead>
+				<tbody class="bg-white divide-y divide-gray-200">
+					${items.map(r => `<tr>
+						<td class="px-4 py-3 text-sm">${r.session_title || 'Session'}</td>
+						<td class="px-4 py-3">${statusBadge(r.status)}</td>
+						<td class="px-4 py-3 text-sm text-gray-500">${formatDate(r.created_at)}</td>
+						<td class="px-4 py-3 text-sm space-x-2">
+							${r.status === 'approved' ? `<button onclick="confirmReg('${r.id}')" class="text-green-600 hover:text-green-800">Confirm</button>` : ''}
+							${['pending','approved','registered'].includes(r.status) ? `<button onclick="cancelReg('${r.id}')" class="text-red-600 hover:text-red-800">Cancel</button>` : ''}
+						</td>
+					</tr>`).join('')}
+				</tbody></table></div>`;
+			document.getElementById('reg-pagination').innerHTML = renderPagination(res.data, 'loadRegistrations');
+		}
+		async function confirmReg(id) {
+			const res = await api(`/api/registrations/${id}/confirm`, { method: 'PUT' });
+			if (res) { showAlert('success', 'Registration confirmed'); loadRegistrations(1); }
+		}
+		async function cancelReg(id) {
+			if (!confirm('Cancel this registration?')) return;
+			const res = await api(`/api/registrations/${id}/cancel`, { method: 'PUT' });
+			if (res) { showAlert('success', 'Registration cancelled'); loadRegistrations(1); }
+		}
+		loadRegistrations(1);
+		</script>
+	}
+}

@@ -11,10 +11,11 @@ import (
 
 type ConfigService struct {
 	configRepo *repository.ConfigRepository
+	auditRepo  *repository.AuditRepository
 }
 
-func NewConfigService(configRepo *repository.ConfigRepository) *ConfigService {
-	return &ConfigService{configRepo: configRepo}
+func NewConfigService(configRepo *repository.ConfigRepository, auditRepo *repository.AuditRepository) *ConfigService {
+	return &ConfigService{configRepo: configRepo, auditRepo: auditRepo}
 }
 
 // ListConfig returns all config entries.
@@ -74,7 +75,7 @@ func (s *ConfigService) UpdateConfig(key, value string, canaryPercentage *int, u
 	}
 
 	// Audit log
-	if err := s.configRepo.CreateAuditLog("config", existing.ID, "config_update", &oldStr, &newStr, userID, ipAddress); err != nil {
+	if err := s.auditRepo.Log("config", existing.ID, "config_update", &oldStr, &newStr, userID, ipAddress); err != nil {
 		log.Printf("Warning: failed to create audit log for config %s: %v", key, err)
 	}
 
@@ -103,7 +104,7 @@ func (s *ConfigService) ListCanary() ([]models.ConfigEntry, error) {
 
 // ListAuditLogs returns recent config audit logs.
 func (s *ConfigService) ListAuditLogs(limit int) ([]models.AuditLog, error) {
-	logs, err := s.configRepo.ListAuditLogs("config", limit)
+	logs, err := s.auditRepo.ListByEntityType("config", limit)
 	if err != nil {
 		return nil, err
 	}

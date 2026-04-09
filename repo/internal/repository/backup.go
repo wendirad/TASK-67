@@ -17,13 +17,13 @@ func NewBackupRepository(db *sql.DB) *BackupRepository {
 }
 
 // CreateBackup inserts a new backup record.
-func (r *BackupRepository) CreateBackup(filename, backupType string) (*models.Backup, error) {
+func (r *BackupRepository) CreateBackup(filename, backupType string, encrypted bool) (*models.Backup, error) {
 	b := &models.Backup{}
 	err := r.db.QueryRow(`
 		INSERT INTO backups (filename, size_bytes, encrypted, type, status)
-		VALUES ($1, 0, true, $2, 'in_progress')
+		VALUES ($1, 0, $3, $2, 'in_progress')
 		RETURNING id, filename, size_bytes, encrypted, type, status, wal_start_lsn, started_at, completed_at, created_at
-	`, filename, backupType).Scan(
+	`, filename, backupType, encrypted).Scan(
 		&b.ID, &b.Filename, &b.SizeBytes, &b.Encrypted, &b.Type,
 		&b.Status, &b.WALStartLSN, &b.StartedAt, &b.CompletedAt, &b.CreatedAt,
 	)
@@ -31,6 +31,41 @@ func (r *BackupRepository) CreateBackup(filename, backupType string) (*models.Ba
 		return nil, fmt.Errorf("create backup: %w", err)
 	}
 	return b, nil
+}
+
+// FindPendingBackups returns all backups with status 'in_progress'.
+func (r *BackupRepository) FindPendingBackups() ([]models.Backup, error) {
+	rows, err := r.db.Query(`
+		SELECT id, filename, size_bytes, encrypted, type, status, wal_start_lsn, started_at, completed_at, created_at
+		FROM backups
+		WHERE status = 'in_progress'
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("find pending backups: %w", err)
+	}
+	defer rows.Close()
+
+	var backups []models.Backup
+	for rows.Next() {
+		var b models.Backup
+		if err := rows.Scan(&b.ID, &b.Filename, &b.SizeBytes, &b.Encrypted, &b.Type,
+			&b.Status, &b.WALStartLSN, &b.StartedAt, &b.CompletedAt, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan pending backup: %w", err)
+		}
+		backups = append(backups, b)
+	}
+	return backups, rows.Err()
+}
+
+// GetCurrentWALLSN returns the current PostgreSQL WAL log sequence number.
+func (r *BackupRepository) GetCurrentWALLSN() (string, error) {
+	var lsn string
+	err := r.db.QueryRow(`SELECT pg_current_wal_lsn()::text`).Scan(&lsn)
+	if err != nil {
+		return "", fmt.Errorf("get current WAL LSN: %w", err)
+	}
+	return lsn, nil
 }
 
 // CompleteBackup marks a backup as completed with file size and WAL LSN.
@@ -376,7 +411,7 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 	// Copy ticket to archive with PII masking on description
 	_, err := tx.Exec(`
 		INSERT INTO archive.tickets (
-			id, ticket_number, subject, description, category, priority,
+			id, ticket_number, subject, description, type, priority,
 			status, created_by, assigned_to,
 			sla_response_deadline, sla_resolution_deadline,
 			sla_response_met, sla_resolution_met,
@@ -384,7 +419,7 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 			created_at, updated_at, archived_at
 		)
 		SELECT
-			id, ticket_number, subject, 'ARCHIVED', category, priority,
+			id, ticket_number, subject, 'ARCHIVED', type, priority,
 			status, created_by, assigned_to,
 			sla_response_deadline, sla_resolution_deadline,
 			sla_response_met, sla_resolution_met,
@@ -399,7 +434,7 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 	// Copy ticket comments with PII masking
 	_, err = tx.Exec(`
 		INSERT INTO archive.ticket_comments (
-			id, ticket_id, user_id, body, created_at, archived_at
+			id, ticket_id, user_id, content, created_at, archived_at
 		)
 		SELECT
 			id, ticket_id, user_id, 'ARCHIVED', created_at, $2

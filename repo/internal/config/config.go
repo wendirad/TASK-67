@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -23,6 +24,8 @@ type Config struct {
 
 	WeChatMerchantKey   string
 	BackupEncryptionKey string
+
+	AllowedOrigins []string
 }
 
 func Load() (*Config, error) {
@@ -51,6 +54,8 @@ func Load() (*Config, error) {
 
 		WeChatMerchantKey:   os.Getenv("WECHAT_MERCHANT_KEY"),
 		BackupEncryptionKey: os.Getenv("BACKUP_ENCRYPTION_KEY"),
+
+		AllowedOrigins: parseOrigins(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
 	}
 
 	if cfg.DBPassword == "" {
@@ -73,4 +78,15 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseOrigins(raw string) []string {
+	var origins []string
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			origins = append(origins, o)
+		}
+	}
+	return origins
 }

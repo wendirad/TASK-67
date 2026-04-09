@@ -13,10 +13,11 @@ import (
 type ShippingService struct {
 	shippingRepo *repository.ShippingRepository
 	orderRepo    *repository.OrderRepository
+	auditRepo    *repository.AuditRepository
 }
 
-func NewShippingService(shippingRepo *repository.ShippingRepository, orderRepo *repository.OrderRepository) *ShippingService {
-	return &ShippingService{shippingRepo: shippingRepo, orderRepo: orderRepo}
+func NewShippingService(shippingRepo *repository.ShippingRepository, orderRepo *repository.OrderRepository, auditRepo *repository.AuditRepository) *ShippingService {
+	return &ShippingService{shippingRepo: shippingRepo, orderRepo: orderRepo, auditRepo: auditRepo}
 }
 
 // ListShipments returns paginated shipping records for staff/admin.
@@ -57,6 +58,13 @@ func (s *ShippingService) Ship(id, staffID string, trackingNumber, carrier *stri
 	}
 
 	log.Printf("Shipment shipped: %s order=%s", id, sr.OrderID)
+
+	oldVal := `{"status":"pending"}`
+	newVal := fmt.Sprintf(`{"status":"shipped","tracking_number":%q}`, ptrStr(trackingNumber))
+	if err := s.auditRepo.Log("shipping_record", id, "shipment_shipped", &oldVal, &newVal, staffID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for shipment %s: %v", id, err)
+	}
+
 	return 200, ""
 }
 
@@ -95,6 +103,13 @@ func (s *ShippingService) Deliver(id, staffID, proofType, proofData string) (int
 	}
 
 	log.Printf("Shipment delivered: %s order=%s proof=%s", id, sr.OrderID, proofType)
+
+	oldVal := fmt.Sprintf(`{"status":"%s"}`, sr.Status)
+	newVal := fmt.Sprintf(`{"status":"delivered","proof_type":"%s"}`, proofType)
+	if err := s.auditRepo.Log("shipping_record", id, "shipment_delivered", &oldVal, &newVal, staffID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for delivery %s: %v", id, err)
+	}
+
 	return 200, ""
 }
 
@@ -132,6 +147,13 @@ func (s *ShippingService) MarkException(id, staffID, notes string) (int, string)
 	}
 
 	log.Printf("Shipment exception: %s order=%s", id, sr.OrderID)
+
+	oldVal := fmt.Sprintf(`{"status":"%s"}`, sr.Status)
+	newVal := fmt.Sprintf(`{"status":"exception","notes":%q}`, notes)
+	if err := s.auditRepo.Log("shipping_record", id, "shipment_exception", &oldVal, &newVal, staffID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for exception %s: %v", id, err)
+	}
+
 	return 200, ""
 }
 
@@ -158,5 +180,19 @@ func (s *ShippingService) CompleteOrder(orderID, userID, role string) (int, stri
 	}
 
 	log.Printf("Order completed: %s", orderID)
+
+	oldVal := `{"status":"delivered"}`
+	newVal := `{"status":"completed"}`
+	if err := s.auditRepo.Log("order", orderID, "order_completed", &oldVal, &newVal, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for complete order %s: %v", orderID, err)
+	}
+
 	return 200, ""
+}
+
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

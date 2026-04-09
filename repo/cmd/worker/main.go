@@ -87,6 +87,20 @@ func main() {
 		Fn:       jobs.Archiver(db),
 	})
 
+	scheduler.AddJob(worker.ScheduledJob{
+		Name:     "backup_executor",
+		LockID:   jobs.BackupExecutorLockID,
+		Interval: 10 * time.Second,
+		Fn:       jobs.BackupExecutor(db, cfg),
+	})
+
+	scheduler.AddJob(worker.ScheduledJob{
+		Name:     "daily_backup",
+		LockID:   jobs.DailyBackupLockID,
+		Interval: 24 * time.Hour,
+		Fn:       jobs.DailyBackup(db, cfg),
+	})
+
 	log.Println("Worker started")
 
 	go func() {

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -272,13 +273,13 @@ func importSession(ctx context.Context, tx *sql.Tx, fields map[string]string) (b
 
 	totalSeats, _ := strconv.Atoi(fields["total_seats"])
 	regCloseMin := 120
-	if fields["registration_close_before_min"] != "" {
-		regCloseMin, _ = strconv.Atoi(fields["registration_close_before_min"])
+	if fields["registration_close_before_minutes"] != "" {
+		regCloseMin, _ = strconv.Atoi(fields["registration_close_before_minutes"])
 	}
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO sessions (facility_id, title, description, coach_name, start_time, end_time,
-		    total_seats, available_seats, registration_close_before_min, status)
+		    total_seats, available_seats, registration_close_before_minutes, status)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, 'open')
 	`, facilityID, fields["title"], fields["description"], fields["coach_name"],
 		startTime, endTime, totalSeats, regCloseMin)
@@ -374,8 +375,35 @@ func processExport(ctx context.Context, db *sql.DB, payloadStr string) (string, 
 		return "", fmt.Errorf("query export data: %w", err)
 	}
 
-	// Generate CSV in memory
 	var buf bytes.Buffer
+
+	if payload.Format == "xlsx" {
+		// Generate Excel file in memory
+		f := excelize.NewFile()
+		sheetName := "Sheet1"
+		for col, h := range headers {
+			cell, _ := excelize.CoordinatesToCellName(col+1, 1)
+			f.SetCellValue(sheetName, cell, h)
+		}
+		for rowIdx, row := range rows {
+			for col, val := range row {
+				cell, _ := excelize.CoordinatesToCellName(col+1, rowIdx+2)
+				f.SetCellValue(sheetName, cell, val)
+			}
+		}
+		if _, err := f.WriteTo(&buf); err != nil {
+			return "", fmt.Errorf("generate xlsx: %w", err)
+		}
+
+		resultJSON, _ := json.Marshal(map[string]interface{}{
+			"row_count":  len(rows),
+			"format":     "xlsx",
+			"xlsx_data":  buf.String(),
+		})
+		return string(resultJSON), nil
+	}
+
+	// Generate CSV in memory
 	writer := csv.NewWriter(&buf)
 	writer.Write(headers)
 	for _, row := range rows {
@@ -383,7 +411,6 @@ func processExport(ctx context.Context, db *sql.DB, payloadStr string) (string, 
 	}
 	writer.Flush()
 
-	// Store result as CSV content in the job result
 	resultJSON, _ := json.Marshal(map[string]interface{}{
 		"row_count": len(rows),
 		"format":    "csv",

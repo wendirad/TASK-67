@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -14,6 +15,8 @@ import (
 
 	"campusrec/internal/models"
 	"campusrec/internal/repository"
+
+	"github.com/xuri/excelize/v2"
 )
 
 type ImportExportService struct {
@@ -68,8 +71,8 @@ func (s *ImportExportService) Import(userID, entityType string, file multipart.F
 
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext != ".csv" {
-		return nil, nil, 400, "File must be a CSV file (.csv)"
+	if ext != ".csv" && ext != ".xlsx" {
+		return nil, nil, 400, "File must be a CSV (.csv) or Excel (.xlsx) file"
 	}
 
 	// Check file size (10MB)
@@ -97,15 +100,23 @@ func (s *ImportExportService) Import(userID, entityType string, file multipart.F
 		return nil, nil, 409, "This file has already been imported"
 	}
 
-	// Parse CSV
-	reader := csv.NewReader(strings.NewReader(string(content)))
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, nil, 400, "Invalid CSV format: " + err.Error()
+	// Parse file into records (headers + data rows)
+	var records [][]string
+	if ext == ".xlsx" {
+		records, err = parseExcelFile(content)
+		if err != nil {
+			return nil, nil, 400, "Invalid Excel file: " + err.Error()
+		}
+	} else {
+		reader := csv.NewReader(strings.NewReader(string(content)))
+		records, err = reader.ReadAll()
+		if err != nil {
+			return nil, nil, 400, "Invalid CSV format: " + err.Error()
+		}
 	}
 
 	if len(records) < 2 {
-		return nil, nil, 400, "CSV file must have a header row and at least one data row"
+		return nil, nil, 400, "File must have a header row and at least one data row"
 	}
 
 	headers := records[0]
@@ -182,8 +193,8 @@ func (s *ImportExportService) Export(userID, entityType, format, filters string)
 	if format == "" {
 		format = "csv"
 	}
-	if format != "csv" {
-		return nil, 400, "Export format must be 'csv'"
+	if format != "csv" && format != "xlsx" {
+		return nil, 400, "Export format must be 'csv' or 'xlsx'"
 	}
 
 	payload := ExportPayload{
@@ -208,8 +219,9 @@ func (s *ImportExportService) Export(userID, entityType, format, filters string)
 	return job, 202, ""
 }
 
-// GetJob returns a job by ID.
-func (s *ImportExportService) GetJob(jobID string) (*models.Job, int, string) {
+// GetJob returns a job by ID after verifying the requesting user is authorized.
+// Staff and admin users can access any job; other users can only access their own.
+func (s *ImportExportService) GetJob(jobID, requestingUserID, requestingUserRole string) (*models.Job, int, string) {
 	job, err := s.jobRepo.FindByID(jobID)
 	if err != nil {
 		log.Printf("Error finding job %s: %v", jobID, err)
@@ -218,7 +230,25 @@ func (s *ImportExportService) GetJob(jobID string) (*models.Job, int, string) {
 	if job == nil {
 		return nil, 404, "Job not found"
 	}
-	return job, 200, ""
+
+	// Staff and admin can view any job
+	if requestingUserRole == "staff" || requestingUserRole == "admin" {
+		return job, 200, ""
+	}
+
+	// For other users, verify ownership via the payload's user_id
+	if job.Payload != nil {
+		var ownerInfo struct {
+			UserID string `json:"user_id"`
+		}
+		if err := json.Unmarshal([]byte(*job.Payload), &ownerInfo); err == nil {
+			if ownerInfo.UserID == requestingUserID {
+				return job, 200, ""
+			}
+		}
+	}
+
+	return nil, 403, "You do not have permission to view this job"
 }
 
 // validateHeaders checks that required columns exist for the entity type.
@@ -320,4 +350,19 @@ func validateRow(entityType string, headers, row []string, rowNum int) []Validat
 	}
 
 	return errors
+}
+
+// parseExcelFile reads an xlsx file from raw bytes and returns all rows from the first sheet.
+func parseExcelFile(content []byte) ([][]string, error) {
+	f, err := excelize.OpenReader(bytes.NewReader(content))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	sheetName := f.GetSheetName(0)
+	rows, err := f.GetRows(sheetName)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

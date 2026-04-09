@@ -1,0 +1,55 @@
+package templates
+
+templ TicketNewPage() {
+	@Base("New Ticket", true) {
+		<div>
+			<div class="mb-4"><a href="/tickets" class="text-indigo-600 hover:text-indigo-800 text-sm">&#8592; Back to Tickets</a></div>
+			<div class="max-w-2xl">
+				<h1 class="text-2xl font-bold text-gray-900 mb-6">Create Ticket</h1>
+				<form id="ticket-form" class="bg-white rounded-lg shadow p-6 space-y-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-700">Subject</label>
+						<input id="ticket-subject" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-700">Category</label>
+						<select id="ticket-category" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+							<option value="general">General</option>
+							<option value="billing">Billing</option>
+							<option value="technical">Technical</option>
+							<option value="account">Account</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-700">Priority</label>
+						<select id="ticket-priority" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+							<option value="low">Low</option>
+							<option value="medium" selected>Medium</option>
+							<option value="high">High</option>
+							<option value="urgent">Urgent</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-gray-700">Description</label>
+						<textarea id="ticket-description" rows="5" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></textarea>
+					</div>
+					<div class="flex justify-end">
+						<button type="submit" id="ticket-btn" class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">Submit Ticket</button>
+					</div>
+				</form>
+			</div>
+		</div>
+		<script>
+		document.getElementById('ticket-form').addEventListener('submit', async (e) => {
+			e.preventDefault();
+			const res = await apiSubmit('/api/tickets', {
+				subject: document.getElementById('ticket-subject').value,
+				category: document.getElementById('ticket-category').value,
+				priority: document.getElementById('ticket-priority').value,
+				description: document.getElementById('ticket-description').value,
+			}, document.getElementById('ticket-btn'), 'Submit Ticket');
+			if (res) window.location.href = '/tickets';
+		});
+		</script>
+	}
+}

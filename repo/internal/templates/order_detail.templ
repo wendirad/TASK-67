@@ -1,0 +1,58 @@
+package templates
+
+templ OrderDetailPage() {
+	@Base("Order", true) {
+		<div>
+			<div class="mb-4"><a href="/orders" class="text-indigo-600 hover:text-indigo-800 text-sm">&#8592; Back to Orders</a></div>
+			<div id="order-detail">
+				<div class="skeleton h-64 rounded-lg"></div>
+			</div>
+		</div>
+		<script>
+		async function loadOrder() {
+			const id = window.location.pathname.split('/').pop();
+			const res = await api(`/api/orders/${id}`);
+			if (!res) return;
+			const o = res.data;
+			document.getElementById('order-detail').innerHTML = `
+				<div class="bg-white rounded-lg shadow p-6">
+					<div class="flex justify-between items-start mb-6">
+						<div>
+							<h1 class="text-2xl font-bold">Order ${o.order_number}</h1>
+							<p class="text-sm text-gray-500 mt-1">Created ${formatDateTime(o.created_at)}</p>
+						</div>
+						${statusBadge(o.status)}
+					</div>
+					${o.items?.length ? `
+					<h3 class="font-medium mb-2">Items</h3>
+					<table class="min-w-full divide-y divide-gray-200 mb-6">
+						<thead><tr>
+							<th class="px-2 py-2 text-left text-xs text-gray-500">Product</th>
+							<th class="px-2 py-2 text-left text-xs text-gray-500">Qty</th>
+							<th class="px-2 py-2 text-left text-xs text-gray-500">Price</th>
+							<th class="px-2 py-2 text-left text-xs text-gray-500">Total</th>
+						</tr></thead>
+						<tbody>${o.items.map(i => `<tr>
+							<td class="px-2 py-2 text-sm">${i.product_name}</td>
+							<td class="px-2 py-2 text-sm">${i.quantity}</td>
+							<td class="px-2 py-2 text-sm">${formatCents(i.unit_price_cents)}</td>
+							<td class="px-2 py-2 text-sm">${formatCents(i.total_cents)}</td>
+						</tr>`).join('')}</tbody>
+					</table>` : ''}
+					<div class="border-t pt-4 flex justify-between items-center">
+						<span class="text-lg font-bold">Total: ${formatCents(o.total_cents)}</span>
+						${o.status === 'pending_payment' ? `<button onclick="cancelOrder('${o.id}')" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Cancel Order</button>` : ''}
+					</div>
+					${o.payment ? `<div class="mt-4 p-3 bg-gray-50 rounded"><p class="text-sm"><strong>Payment:</strong> ${o.payment.payment_method} - ${statusBadge(o.payment.status)}</p></div>` : ''}
+					${o.ship_to_line1 ? `<div class="mt-4 p-3 bg-gray-50 rounded"><p class="text-sm font-medium">Shipping Address</p><p class="text-sm text-gray-600">${o.ship_to_recipient || ''}<br>${o.ship_to_line1}${o.ship_to_line2 ? ', '+o.ship_to_line2 : ''}<br>${o.ship_to_city || ''} ${o.ship_to_province || ''} ${o.ship_to_postal_code || ''}</p></div>` : ''}
+				</div>`;
+		}
+		async function cancelOrder(id) {
+			if (!confirm('Cancel this order?')) return;
+			const res = await api(`/api/orders/${id}/cancel`, { method: 'PUT' });
+			if (res) { showAlert('success', 'Order cancelled'); loadOrder(); }
+		}
+		loadOrder();
+		</script>
+	}
+}

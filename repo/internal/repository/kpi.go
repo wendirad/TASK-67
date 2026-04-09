@@ -307,7 +307,7 @@ func (r *KPIRepository) RevenueMetrics(from, to time.Time, granularity string) (
 		SELECT COALESCE(SUM(p.amount_cents), 0)
 		FROM payments p
 		JOIN orders o ON o.id = p.order_id
-		WHERE p.status = 'paid' AND p.created_at BETWEEN $1 AND $2
+		WHERE p.status = 'confirmed' AND p.created_at BETWEEN $1 AND $2
 	`, from, to).Scan(&summary.TotalCents)
 	if err != nil {
 		return nil, fmt.Errorf("revenue total: %w", err)
@@ -320,7 +320,7 @@ func (r *KPIRepository) RevenueMetrics(from, to time.Time, granularity string) (
 		       COALESCE(SUM(p.amount_cents), 0),
 		       COUNT(DISTINCT p.order_id)
 		FROM payments p
-		WHERE p.status = 'paid' AND p.created_at BETWEEN $1 AND $2
+		WHERE p.status = 'confirmed' AND p.created_at BETWEEN $1 AND $2
 		GROUP BY period ORDER BY period
 	`, trunc), from, to)
 	if err != nil {
@@ -350,7 +350,7 @@ func (r *KPIRepository) RevenueMetrics(from, to time.Time, granularity string) (
 		JOIN products pr ON pr.id = oi.product_id
 		JOIN orders o ON o.id = oi.order_id
 		JOIN payments p ON p.order_id = o.id
-		WHERE p.status = 'paid' AND p.created_at BETWEEN $1 AND $2
+		WHERE p.status = 'confirmed' AND p.created_at BETWEEN $1 AND $2
 		GROUP BY pr.category
 		ORDER BY total_cents DESC
 	`, from, to)
@@ -377,6 +377,8 @@ func (r *KPIRepository) RevenueMetrics(from, to time.Time, granularity string) (
 type TicketMetricsResult struct {
 	OpenCount           int     `json:"open_count"`
 	InProgressCount     int     `json:"in_progress_count"`
+	ResolvedCount       int     `json:"resolved_count"`
+	ClosedCount         int     `json:"closed_count"`
 	AvgResolutionHours  float64 `json:"avg_resolution_hours"`
 	SLAResponseRate     float64 `json:"sla_response_compliance_pct"`
 	SLAResolutionRate   float64 `json:"sla_resolution_compliance_pct"`
@@ -391,9 +393,11 @@ func (r *KPIRepository) TicketMetrics() (*TicketMetricsResult, error) {
 		SELECT
 		    COALESCE(SUM(CASE WHEN status IN ('open', 'assigned') THEN 1 ELSE 0 END), 0),
 		    COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END), 0),
 		    COUNT(*)
 		FROM tickets
-	`).Scan(&result.OpenCount, &result.InProgressCount, &result.TotalTickets)
+	`).Scan(&result.OpenCount, &result.InProgressCount, &result.ResolvedCount, &result.ClosedCount, &result.TotalTickets)
 	if err != nil {
 		return nil, fmt.Errorf("ticket counts: %w", err)
 	}

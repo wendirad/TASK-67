@@ -130,6 +130,7 @@ func runServe(cfg *config.Config) {
 	kpiRepo := repository.NewKPIRepository(db)
 	jobRepo := repository.NewJobRepository(db)
 	configRepo := repository.NewConfigRepository(db)
+	auditRepo := repository.NewAuditRepository(db)
 	backupRepo := repository.NewBackupRepository(db)
 
 	// Services
@@ -142,15 +143,24 @@ func runServe(cfg *config.Config) {
 	catalogService := services.NewCatalogService(catalogRepo)
 	regService := services.NewRegistrationService(regRepo, sessionRepo, userRepo)
 	cartService := services.NewCartService(cartRepo, productRepo)
-	orderService := services.NewOrderService(orderRepo, productRepo, addressRepo, cartRepo, userRepo)
+	orderService := services.NewOrderService(orderRepo, productRepo, addressRepo, cartRepo, userRepo, auditRepo)
 	checkinService := services.NewCheckInService(checkinRepo, regRepo, sessionRepo, facilityRepo, cfg.JWTSecret)
-	shippingService := services.NewShippingService(shippingRepo, orderRepo)
+	shippingService := services.NewShippingService(shippingRepo, orderRepo, auditRepo)
 	postService := services.NewPostService(postRepo, userRepo)
-	ticketService := services.NewTicketService(ticketRepo, userRepo)
+	ticketService := services.NewTicketService(ticketRepo, userRepo, auditRepo)
 	kpiService := services.NewKPIService(kpiRepo)
 	ieService := services.NewImportExportService(jobRepo)
-	configService := services.NewConfigService(configRepo)
-	backupService := services.NewBackupService(backupRepo)
+	configService := services.NewConfigService(configRepo, auditRepo)
+	backupService := services.NewBackupService(backupRepo, services.BackupConfig{
+		DBHost:              cfg.DBHost,
+		DBPort:              cfg.DBPort,
+		DBName:              cfg.DBName,
+		DBUser:              cfg.DBUser,
+		DBPassword:          cfg.DBPassword,
+		BackupPath:          cfg.BackupPath,
+		BackupEncryptionKey: cfg.BackupEncryptionKey,
+	})
+	paymentService := services.NewPaymentService(orderRepo, auditRepo, cfg.WeChatMerchantKey)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
@@ -176,13 +186,10 @@ func runServe(cfg *config.Config) {
 	ieHandler := handlers.NewImportExportHandler(ieService)
 	configHandler := handlers.NewConfigHandler(configService)
 	backupHandler := handlers.NewBackupHandler(backupService)
+	paymentHandler := handlers.NewPaymentHandler(paymentService)
 
-	// Page handler
-	templatesDir := "./templates"
-	if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-		templatesDir = filepath.Join(".", "internal", "templates")
-	}
-	pageHandler := handlers.NewPageHandler(templatesDir)
+	// Page handler (Templ components are compiled into Go code)
+	pageHandler := handlers.NewPageHandler("")
 
 	gin.SetMode(cfg.GinMode)
 	router := gin.New()
@@ -190,7 +197,7 @@ func runServe(cfg *config.Config) {
 	// Global middleware chain: Recovery → Logging → CORS → RateLimit
 	router.Use(gin.Recovery())
 	router.Use(requestLogger())
-	router.Use(middleware.CORS())
+	router.Use(middleware.CORS(cfg.AllowedOrigins))
 	router.Use(middleware.RateLimit())
 
 	// HTML page routes
@@ -285,6 +292,13 @@ func runServe(cfg *config.Config) {
 	orders.GET("/:id", orderHandler.Get)
 	orders.PUT("/:id/cancel", orderHandler.Cancel)
 	orders.POST("/:id/complete", shippingHandler.CompleteOrder)
+
+	// Payment endpoints
+	api.POST("/payments/callback", paymentHandler.Callback)
+	payments := api.Group("/payments")
+	payments.Use(middleware.AuthRequired(cfg.JWTSecret))
+	payments.Use(middleware.RequireRole("staff", "admin"))
+	payments.POST("/:id/simulate-callback", paymentHandler.SimulateCallback)
 
 	// Post endpoints (authenticated)
 	posts := api.Group("/posts")

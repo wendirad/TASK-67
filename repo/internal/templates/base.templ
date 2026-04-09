@@ -1,0 +1,191 @@
+package templates
+
+templ Base(title string, authenticated bool) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full bg-gray-50">
+	<head>
+		<meta charset="UTF-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+		<title>
+			if title != "" {
+				{ title } - CampusRec
+			} else {
+				CampusRec
+			}
+		</title>
+		<link rel="stylesheet" href="/static/tailwind.min.css"/>
+		<script src="/static/chart.umd.min.js"></script>
+		<style>
+			[x-cloak] { display: none !important; }
+			.alert-enter { animation: slideIn 0.3s ease-out; }
+			.alert-exit { animation: slideOut 0.3s ease-in forwards; }
+			@keyframes slideIn { from { transform: translateY(-1rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+			@keyframes slideOut { from { opacity: 1; } to { opacity: 0; } }
+			.skeleton { background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+			@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+		</style>
+	</head>
+	<body class="h-full">
+		<div id="alert-container" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm"></div>
+		if authenticated {
+			<div class="min-h-full flex">
+				<!-- Sidebar -->
+				<aside id="sidebar" class="hidden lg:flex lg:flex-shrink-0">
+					<div class="flex flex-col w-64 bg-gray-800">
+						<div class="flex items-center h-16 px-4 bg-gray-900">
+							<a href="/dashboard" class="text-white font-bold text-lg">CampusRec</a>
+						</div>
+						<nav class="flex-1 px-2 py-4 space-y-1 overflow-y-auto" id="sidebar-nav"></nav>
+						<div class="p-4 border-t border-gray-700">
+							<div class="flex items-center">
+								<div class="flex-1 min-w-0">
+									<p class="text-sm font-medium text-white truncate" id="nav-display-name"></p>
+									<p class="text-xs text-gray-400 truncate" id="nav-role"></p>
+								</div>
+								<button onclick="logout()" class="ml-2 text-gray-400 hover:text-white" title="Logout">
+									<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+								</button>
+							</div>
+						</div>
+					</div>
+				</aside>
+				<!-- Mobile menu button -->
+				<div class="lg:hidden fixed top-0 left-0 right-0 z-40 bg-gray-800 h-14 flex items-center px-4">
+					<button onclick="toggleMobileMenu()" class="text-white">
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+					</button>
+					<span class="text-white font-bold ml-3">CampusRec</span>
+				</div>
+				<!-- Mobile sidebar overlay -->
+				<div id="mobile-overlay" class="hidden fixed inset-0 z-40 lg:hidden">
+					<div class="fixed inset-0 bg-gray-600 bg-opacity-75" onclick="toggleMobileMenu()"></div>
+					<div class="relative flex flex-col w-64 bg-gray-800 h-full">
+						<div class="flex items-center h-14 px-4 bg-gray-900">
+							<span class="text-white font-bold text-lg">CampusRec</span>
+							<button onclick="toggleMobileMenu()" class="ml-auto text-white"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+						</div>
+						<nav class="flex-1 px-2 py-4 space-y-1 overflow-y-auto" id="mobile-nav"></nav>
+					</div>
+				</div>
+				<!-- Main content -->
+				<div class="flex-1 flex flex-col min-w-0">
+					<main class="flex-1 p-4 lg:p-6 mt-14 lg:mt-0 overflow-auto">
+						{ children... }
+					</main>
+				</div>
+			</div>
+		} else {
+			{ children... }
+		}
+		<script>
+		let currentUser = null;
+		function showAlert(type, message) {
+			const container = document.getElementById('alert-container');
+			const colors = { success: 'bg-green-500', error: 'bg-red-500', warning: 'bg-yellow-500', info: 'bg-blue-500' };
+			const alert = document.createElement('div');
+			alert.className = `${colors[type] || colors.info} text-white px-4 py-3 rounded-lg shadow-lg alert-enter text-sm`;
+			alert.textContent = message;
+			container.appendChild(alert);
+			setTimeout(() => { alert.classList.add('alert-exit'); setTimeout(() => alert.remove(), 300); }, 3000);
+		}
+		async function api(url, options = {}) {
+			const defaults = { headers: { 'Content-Type': 'application/json' }, credentials: 'include' };
+			const res = await fetch(url, { ...defaults, ...options });
+			const data = await res.json().catch(() => null);
+			if (!res.ok) {
+				const msg = data?.msg || `Error ${res.status}`;
+				if (res.status === 401) { window.location.href = '/login'; return null; }
+				showAlert('error', msg);
+				return null;
+			}
+			return data;
+		}
+		async function apiSubmit(url, body, btn, btnText) {
+			if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+			try {
+				const res = await api(url, { method: 'POST', body: JSON.stringify(body) });
+				if (res) showAlert('success', res.msg || 'Success');
+				return res;
+			} finally {
+				if (btn) { btn.disabled = false; btn.textContent = btnText || 'Submit'; }
+			}
+		}
+		const navItems = {
+			member: [
+				{ href: '/dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', label: 'Dashboard' },
+				{ href: '/catalog', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16', label: 'Catalog' },
+				{ href: '/registrations', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2', label: 'Registrations' },
+				{ href: '/cart', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z', label: 'Cart' },
+				{ href: '/orders', icon: 'M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z', label: 'Orders' },
+				{ href: '/addresses', icon: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z', label: 'Addresses' },
+				{ href: '/posts', icon: 'M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2', label: 'Posts' },
+				{ href: '/tickets', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z', label: 'Tickets' },
+			],
+			staff: [
+				{ href: '/dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', label: 'Dashboard' },
+				{ href: '/staff/shipping', icon: 'M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0', label: 'Shipping' },
+				{ href: '/tickets', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z', label: 'Tickets' },
+			],
+			moderator: [
+				{ href: '/dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', label: 'Dashboard' },
+				{ href: '/moderation', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z', label: 'Moderation' },
+				{ href: '/tickets', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z', label: 'Tickets' },
+			],
+			admin: [
+				{ href: '/dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', label: 'Dashboard' },
+				{ href: '/admin/users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z', label: 'Users' },
+				{ href: '/admin/sessions', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Sessions' },
+				{ href: '/catalog', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16', label: 'Catalog' },
+				{ href: '/admin/kpi', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: 'KPI' },
+				{ href: '/admin/tickets', icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z', label: 'Tickets' },
+				{ href: '/admin/config', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', label: 'Config' },
+				{ href: '/admin/import-export', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12', label: 'Import/Export' },
+				{ href: '/admin/backup', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4', label: 'Backup' },
+			]
+		};
+		function buildNav(role, containerId) {
+			const items = navItems[role] || navItems.member;
+			const container = document.getElementById(containerId);
+			if (!container) return;
+			container.innerHTML = items.map(item => {
+				const active = window.location.pathname === item.href || (item.href !== '/dashboard' && window.location.pathname.startsWith(item.href));
+				return `<a href="${item.href}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md ${active ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}"><svg class="mr-3 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${item.icon}"/></svg>${item.label}</a>`;
+			}).join('');
+		}
+		function toggleMobileMenu() { document.getElementById('mobile-overlay').classList.toggle('hidden'); }
+		async function loadCurrentUser() {
+			const res = await api('/api/auth/me');
+			if (!res) return null;
+			currentUser = res.data;
+			const dn = document.getElementById('nav-display-name'); if (dn) dn.textContent = currentUser.display_name;
+			const nr = document.getElementById('nav-role'); if (nr) nr.textContent = currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1);
+			buildNav(currentUser.role, 'sidebar-nav');
+			buildNav(currentUser.role, 'mobile-nav');
+			return currentUser;
+		}
+		async function logout() { await api('/api/auth/logout', { method: 'POST' }); window.location.href = '/login'; }
+		function formatDate(d) { return d ? new Date(d).toLocaleDateString() : '-'; }
+		function formatDateTime(d) { return d ? new Date(d).toLocaleString() : '-'; }
+		function formatCents(c) { return '$' + (c / 100).toFixed(2); }
+		function statusBadge(status) {
+			const colors = {
+				active: 'bg-green-100 text-green-800', completed: 'bg-green-100 text-green-800', paid: 'bg-green-100 text-green-800', delivered: 'bg-green-100 text-green-800', approved: 'bg-green-100 text-green-800', resolved: 'bg-green-100 text-green-800',
+				pending: 'bg-yellow-100 text-yellow-800', pending_payment: 'bg-yellow-100 text-yellow-800', in_progress: 'bg-yellow-100 text-yellow-800', assigned: 'bg-yellow-100 text-yellow-800', open: 'bg-yellow-100 text-yellow-800', registered: 'bg-blue-100 text-blue-800', shipped: 'bg-blue-100 text-blue-800',
+				cancelled: 'bg-gray-100 text-gray-800', closed: 'bg-gray-100 text-gray-800', rejected: 'bg-red-100 text-red-800', failed: 'bg-red-100 text-red-800', banned: 'bg-red-100 text-red-800', refunded: 'bg-purple-100 text-purple-800',
+			};
+			const color = colors[status] || 'bg-gray-100 text-gray-800';
+			return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${color}">${status.replace(/_/g, ' ')}</span>`;
+		}
+		function renderPagination(data, loadFn) {
+			if (!data || data.total_pages <= 1) return '';
+			let html = '<div class="flex items-center justify-between mt-4"><div class="text-sm text-gray-700">Page ' + data.page + ' of ' + data.total_pages + ' (' + data.total + ' items)</div><div class="flex space-x-2">';
+			if (data.page > 1) html += `<button onclick="${loadFn}(${data.page - 1})" class="px-3 py-1 border rounded text-sm hover:bg-gray-50">Prev</button>`;
+			if (data.page < data.total_pages) html += `<button onclick="${loadFn}(${data.page + 1})" class="px-3 py-1 border rounded text-sm hover:bg-gray-50">Next</button>`;
+			html += '</div></div>';
+			return html;
+		}
+		if (document.getElementById('sidebar-nav')) { loadCurrentUser(); }
+		</script>
+	</body>
+	</html>
+}

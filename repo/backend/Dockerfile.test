@@ -1,10 +1,12 @@
-FROM golang:1.23-alpine
+FROM golang:1.24-alpine
 RUN apk add --no-cache gcc musl-dev wget
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
+RUN go install github.com/a-h/templ/cmd/templ@v0.2.793
 COPY internal/ ./internal/
 COPY cmd/ ./cmd/
+RUN templ generate ./internal/templates/
 COPY unit_tests/ ./unit_tests/
 COPY API_tests/ ./API_tests/
 CMD ["go", "test", "./unit_tests/...", "-v", "-count=1"]

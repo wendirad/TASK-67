@@ -1,0 +1,43 @@
+package templates
+
+templ ModerationPage() {
+	@Base("Moderation", true) {
+		<div>
+			<h1 class="text-2xl font-bold text-gray-900 mb-6">Moderation Queue</h1>
+			<div id="mod-list"><div class="skeleton h-24 rounded-lg mb-3"></div></div>
+			<div id="mod-pagination"></div>
+		</div>
+		<script>
+		async function loadModeration(page) {
+			const res = await api(`/api/moderation/posts?page=${page || 1}&page_size=20`);
+			if (!res) return;
+			const items = res.data?.items || [];
+			const el = document.getElementById('mod-list');
+			if (!items.length) { el.innerHTML = '<p class="text-gray-500 py-4">No posts pending moderation.</p>'; return; }
+			el.innerHTML = items.map(p => `
+				<div class="bg-white rounded-lg shadow p-4 mb-3">
+					<div class="flex justify-between items-start">
+						<div class="flex-1">
+							<h3 class="font-medium">${p.title}</h3>
+							<p class="text-sm text-gray-600 mt-1">${p.body || ''}</p>
+							<p class="text-xs text-gray-400 mt-2">By ${p.display_name || p.username || 'User'} | ${formatDateTime(p.created_at)} | Reports: ${p.report_count || 0}</p>
+						</div>
+						<div class="flex space-x-2 ml-4">
+							<button onclick="moderatePost('${p.id}', 'approve')" class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Approve</button>
+							<button onclick="moderatePost('${p.id}', 'reject')" class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700">Reject</button>
+						</div>
+					</div>
+				</div>
+			`).join('');
+			document.getElementById('mod-pagination').innerHTML = renderPagination(res.data, 'loadModeration');
+		}
+		async function moderatePost(id, decision) {
+			const reason = decision === 'reject' ? prompt('Rejection reason:') : null;
+			if (decision === 'reject' && !reason) return;
+			const res = await api(`/api/moderation/posts/${id}/decision`, { method: 'POST', body: JSON.stringify({ decision, reason }) });
+			if (res) { showAlert('success', `Post ${decision}d`); loadModeration(1); }
+		}
+		loadModeration(1);
+		</script>
+	}
+}

@@ -1,0 +1,59 @@
+package templates
+
+templ StaffShippingPage() {
+	@Base("Shipping", true) {
+		<div>
+			<h1 class="text-2xl font-bold text-gray-900 mb-6">Shipping Management</h1>
+			<div id="shipping-list"><div class="skeleton h-16 rounded mb-2"></div></div>
+			<div id="shipping-pagination"></div>
+		</div>
+		<script>
+		async function loadShipments(page) {
+			const res = await api(`/api/staff/shipping?page=${page || 1}&page_size=20`);
+			if (!res) return;
+			const items = res.data?.items || [];
+			const el = document.getElementById('shipping-list');
+			if (!items.length) { el.innerHTML = '<p class="text-gray-500 py-4">No shipments found.</p>'; return; }
+			el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-x-auto"><table class="min-w-full divide-y divide-gray-200">
+				<thead class="bg-gray-50"><tr>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tracking</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+					<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+				</tr></thead>
+				<tbody class="divide-y divide-gray-200">
+					${items.map(s => `<tr>
+						<td class="px-4 py-3 text-sm">${s.order_number || s.order_id}</td>
+						<td class="px-4 py-3">${statusBadge(s.status)}</td>
+						<td class="px-4 py-3 text-sm">${s.tracking_number || '-'}</td>
+						<td class="px-4 py-3 text-sm text-gray-500">${formatDate(s.created_at)}</td>
+						<td class="px-4 py-3 text-sm space-x-2">
+							${s.status === 'pending' ? `<button onclick="shipItem('${s.id}')" class="text-blue-600 hover:text-blue-800">Ship</button>` : ''}
+							${s.status === 'shipped' ? `<button onclick="deliverItem('${s.id}')" class="text-green-600 hover:text-green-800">Deliver</button>` : ''}
+							${['pending','shipped'].includes(s.status) ? `<button onclick="exceptionItem('${s.id}')" class="text-red-600 hover:text-red-800">Exception</button>` : ''}
+						</td>
+					</tr>`).join('')}
+				</tbody></table></div>`;
+			document.getElementById('shipping-pagination').innerHTML = renderPagination(res.data, 'loadShipments');
+		}
+		async function shipItem(id) {
+			const tracking = prompt('Tracking number:');
+			if (!tracking) return;
+			const res = await api(`/api/staff/shipping/${id}/ship`, { method: 'PUT', body: JSON.stringify({ tracking_number: tracking }) });
+			if (res) { showAlert('success', 'Shipped'); loadShipments(1); }
+		}
+		async function deliverItem(id) {
+			const res = await api(`/api/staff/shipping/${id}/deliver`, { method: 'PUT', body: JSON.stringify({}) });
+			if (res) { showAlert('success', 'Delivered'); loadShipments(1); }
+		}
+		async function exceptionItem(id) {
+			const reason = prompt('Exception reason:');
+			if (!reason) return;
+			const res = await api(`/api/staff/shipping/${id}/exception`, { method: 'PUT', body: JSON.stringify({ reason }) });
+			if (res) { showAlert('success', 'Exception recorded'); loadShipments(1); }
+		}
+		loadShipments(1);
+		</script>
+	}
+}

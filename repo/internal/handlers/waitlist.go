@@ -18,20 +18,31 @@ func NewWaitlistHandler(waitlistRepo *repository.WaitlistRepository) *WaitlistHa
 }
 
 func (h *WaitlistHandler) GetPosition(c *gin.Context) {
+	userID := middleware.GetUserID(c)
 	sessionID := c.Query("session_id")
-	if sessionID == "" {
-		Error(c, http.StatusBadRequest, "session_id query parameter is required")
+
+	if sessionID != "" {
+		pos, err := h.waitlistRepo.GetPosition(userID, sessionID)
+		if err != nil {
+			Error(c, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if pos == nil {
+			Error(c, http.StatusNotFound, "Not on waitlist for this session")
+			return
+		}
+		Success(c, http.StatusOK, "OK", pos)
 		return
 	}
 
-	userID := middleware.GetUserID(c)
-	pos, err := h.waitlistRepo.GetPosition(userID, sessionID)
+	// No session_id: return user's most recent active waitlist position
+	pos, err := h.waitlistRepo.GetActivePosition(userID)
 	if err != nil {
 		Error(c, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if pos == nil {
-		Error(c, http.StatusNotFound, "Not on waitlist for this session")
+		Success(c, http.StatusOK, "OK", nil)
 		return
 	}
 

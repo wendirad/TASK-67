@@ -73,7 +73,10 @@ func (h *ImportExportHandler) Export(c *gin.Context) {
 
 func (h *ImportExportHandler) GetJob(c *gin.Context) {
 	id := c.Param("id")
-	job, code, msg := h.ieService.GetJob(id)
+	userID := middleware.GetUserID(c)
+	userRole := middleware.GetUserRole(c)
+
+	job, code, msg := h.ieService.GetJob(id, userID, userRole)
 	if code != http.StatusOK {
 		Error(c, code, msg)
 		return

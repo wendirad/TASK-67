@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"log"
 
 	"campusrec/internal/models"
@@ -13,6 +14,7 @@ type OrderService struct {
 	addressRepo *repository.AddressRepository
 	cartRepo    *repository.CartRepository
 	userRepo    *repository.UserRepository
+	auditRepo   *repository.AuditRepository
 }
 
 func NewOrderService(
@@ -21,6 +23,7 @@ func NewOrderService(
 	addressRepo *repository.AddressRepository,
 	cartRepo *repository.CartRepository,
 	userRepo *repository.UserRepository,
+	auditRepo *repository.AuditRepository,
 ) *OrderService {
 	return &OrderService{
 		orderRepo:   orderRepo,
@@ -28,6 +31,7 @@ func NewOrderService(
 		addressRepo: addressRepo,
 		cartRepo:    cartRepo,
 		userRepo:    userRepo,
+		auditRepo:   auditRepo,
 	}
 }
 
@@ -122,6 +126,12 @@ func (s *OrderService) CreateOrder(userID string, req *models.CreateOrderRequest
 	}
 
 	log.Printf("Order created: order=%s number=%s user=%s total=%d", order.ID, order.OrderNumber, userID, order.TotalCents)
+
+	newVal := fmt.Sprintf(`{"order_number":"%s","total_cents":%d,"status":"pending_payment"}`, order.OrderNumber, order.TotalCents)
+	if err := s.auditRepo.Log("order", order.ID, "order_created", nil, &newVal, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for order %s: %v", order.ID, err)
+	}
+
 	return order, 201, ""
 }
 
@@ -182,11 +192,18 @@ func (s *OrderService) CancelOrder(orderID, userID, role string) (int, string) {
 	}
 
 	log.Printf("Order canceled: order=%s user=%s", orderID, userID)
+
+	oldVal := fmt.Sprintf(`{"status":"%s"}`, order.Status)
+	newVal := `{"status":"closed","close_reason":"Canceled by user"}`
+	if err := s.auditRepo.Log("order", orderID, "order_canceled", &oldVal, &newVal, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for cancel order %s: %v", orderID, err)
+	}
+
 	return 200, ""
 }
 
 // RefundOrder processes a refund (admin only).
-func (s *OrderService) RefundOrder(orderID string) (int, string) {
+func (s *OrderService) RefundOrder(orderID, userID string) (int, string) {
 	order, err := s.orderRepo.FindByID(orderID)
 	if err != nil {
 		log.Printf("Error finding order %s: %v", orderID, err)
@@ -209,5 +226,12 @@ func (s *OrderService) RefundOrder(orderID string) (int, string) {
 	}
 
 	log.Printf("Order refunded: order=%s", orderID)
+
+	oldVal := fmt.Sprintf(`{"status":"%s"}`, order.Status)
+	newVal := `{"status":"refunded"}`
+	if err := s.auditRepo.Log("order", orderID, "order_refunded", &oldVal, &newVal, userID, ""); err != nil {
+		log.Printf("Warning: failed to create audit log for refund order %s: %v", orderID, err)
+	}
+
 	return 200, ""
 }

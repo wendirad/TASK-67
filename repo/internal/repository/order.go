@@ -296,6 +296,86 @@ func (r *OrderRepository) ListAll(page, pageSize int, status, userID string) ([]
 	return orders, total, nil
 }
 
+// ConfirmPayment atomically transitions a payment to confirmed and order to paid.
+// Returns (alreadyProcessed, error). alreadyProcessed=true means the transactionID
+// was already recorded (idempotent success).
+func (r *OrderRepository) ConfirmPayment(orderID, transactionID, callbackSignature string) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check for idempotency: if this transaction_id already exists, it's a duplicate callback
+	var existingPaymentID string
+	err = tx.QueryRow(`
+		SELECT id FROM payments WHERE transaction_id = $1
+	`, transactionID).Scan(&existingPaymentID)
+	if err == nil {
+		// Already processed
+		return true, nil
+	}
+	if err != sql.ErrNoRows {
+		return false, fmt.Errorf("check idempotency: %w", err)
+	}
+
+	// Update payment: pending → confirmed
+	result, err := tx.Exec(`
+		UPDATE payments SET status = 'confirmed', transaction_id = $1,
+		    callback_signature = $2, callback_received_at = NOW(), updated_at = NOW()
+		WHERE order_id = $3 AND status = 'pending'
+	`, transactionID, callbackSignature, orderID)
+	if err != nil {
+		return false, fmt.Errorf("confirm payment: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return false, fmt.Errorf("no pending payment found for order")
+	}
+
+	// Update order: pending_payment → paid
+	result, err = tx.Exec(`
+		UPDATE orders SET status = 'paid', paid_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND status = 'pending_payment'
+	`, orderID)
+	if err != nil {
+		return false, fmt.Errorf("update order to paid: %w", err)
+	}
+	affected, _ = result.RowsAffected()
+	if affected == 0 {
+		return false, fmt.Errorf("order is not in pending_payment state")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit payment confirmation: %w", err)
+	}
+	return false, nil
+}
+
+// FindOrderByNumber looks up an order by its order_number.
+func (r *OrderRepository) FindOrderByNumber(orderNumber string) (*Order, error) {
+	var orderID string
+	var totalCents int
+	var status string
+	err := r.db.QueryRow(`
+		SELECT id, total_cents, status FROM orders WHERE order_number = $1
+	`, orderNumber).Scan(&orderID, &totalCents, &status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find order by number: %w", err)
+	}
+	return &Order{ID: orderID, TotalCents: totalCents, Status: status}, nil
+}
+
+// Order is a lightweight struct for internal lookups.
+type Order struct {
+	ID         string
+	TotalCents int
+	Status     string
+}
+
 // CancelOrder cancels an order and restores stock atomically.
 func (r *OrderRepository) CancelOrder(orderID string) error {
 	tx, err := r.db.Begin()

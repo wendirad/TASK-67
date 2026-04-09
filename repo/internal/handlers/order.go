@@ -92,8 +92,9 @@ func NewAdminOrderHandler(orderService *services.OrderService) *AdminOrderHandle
 
 func (h *AdminOrderHandler) Refund(c *gin.Context) {
 	id := c.Param("id")
+	userID := middleware.GetUserID(c)
 
-	code, msg := h.orderService.RefundOrder(id)
+	code, msg := h.orderService.RefundOrder(id, userID)
 	if code != http.StatusOK {
 		Error(c, code, msg)
 		return

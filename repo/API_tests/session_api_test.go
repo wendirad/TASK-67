@@ -28,7 +28,7 @@ func TestAdminCreateSession(t *testing.T) {
 
 	// First create a facility
 	facResp := c.post("/api/admin/facilities", map[string]interface{}{
-		"name":         "Session Test Gym",
+		"name":         uniqueName("sess_gym"),
 		"address":      "456 Test Ave",
 		"checkin_mode": "staff_qr",
 	})
