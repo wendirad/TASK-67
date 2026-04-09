@@ -1,0 +1,104 @@
+{{define "content"}}
+<div>
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">My Addresses</h1>
+        <button onclick="showAddressForm()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">Add Address</button>
+    </div>
+    <div id="address-form-container" class="hidden mb-6 bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-medium mb-4" id="address-form-title">Add Address</h3>
+        <form id="address-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input type="hidden" id="addr-id">
+            <div><label class="block text-sm font-medium text-gray-700">Recipient</label><input id="addr-recipient" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Phone</label><input id="addr-phone" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700">Address Line 1</label><input id="addr-line1" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Address Line 2</label><input id="addr-line2" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700">City</label><input id="addr-city" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Province</label><input id="addr-province" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700">Postal Code</label><input id="addr-postal" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div class="md:col-span-2 flex justify-end space-x-2">
+                <button type="button" onclick="hideAddressForm()" class="px-4 py-2 border rounded-md text-sm">Cancel</button>
+                <button type="submit" id="addr-submit-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">Save</button>
+            </div>
+        </form>
+    </div>
+    <div id="address-list">
+        <div class="skeleton h-24 rounded-lg mb-3"></div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function showAddressForm(addr) {
+    document.getElementById('address-form-container').classList.remove('hidden');
+    document.getElementById('address-form-title').textContent = addr ? 'Edit Address' : 'Add Address';
+    document.getElementById('addr-id').value = addr?.id || '';
+    document.getElementById('addr-recipient').value = addr?.recipient || '';
+    document.getElementById('addr-phone').value = addr?.phone || '';
+    document.getElementById('addr-line1').value = addr?.line1 || '';
+    document.getElementById('addr-line2').value = addr?.line2 || '';
+    document.getElementById('addr-city').value = addr?.city || '';
+    document.getElementById('addr-province').value = addr?.province || '';
+    document.getElementById('addr-postal').value = addr?.postal_code || '';
+}
+
+function hideAddressForm() {
+    document.getElementById('address-form-container').classList.add('hidden');
+}
+
+document.getElementById('address-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('addr-id').value;
+    const body = {
+        recipient: document.getElementById('addr-recipient').value,
+        phone: document.getElementById('addr-phone').value,
+        line1: document.getElementById('addr-line1').value,
+        line2: document.getElementById('addr-line2').value,
+        city: document.getElementById('addr-city').value,
+        province: document.getElementById('addr-province').value,
+        postal_code: document.getElementById('addr-postal').value,
+    };
+    const url = id ? `/api/addresses/${id}` : '/api/addresses';
+    const method = id ? 'PUT' : 'POST';
+    const res = await api(url, { method, body: JSON.stringify(body) });
+    if (res) { showAlert('success', id ? 'Address updated' : 'Address added'); hideAddressForm(); loadAddresses(); }
+});
+
+async function loadAddresses() {
+    const res = await api('/api/addresses');
+    if (!res) return;
+    const items = res.data || [];
+    const el = document.getElementById('address-list');
+    if (!items.length) { el.innerHTML = '<p class="text-gray-500 py-4">No addresses yet. Add one to get started.</p>'; return; }
+
+    el.innerHTML = items.map(a => `
+        <div class="bg-white rounded-lg shadow p-4 mb-3 flex justify-between items-start">
+            <div>
+                <p class="font-medium">${a.recipient} ${a.is_default ? '<span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full ml-2">Default</span>' : ''}</p>
+                <p class="text-sm text-gray-600">${a.line1}${a.line2 ? ', '+a.line2 : ''}</p>
+                <p class="text-sm text-gray-600">${a.city || ''} ${a.province || ''} ${a.postal_code || ''}</p>
+                ${a.phone ? `<p class="text-sm text-gray-500">${a.phone}</p>` : ''}
+            </div>
+            <div class="flex space-x-2 text-sm">
+                ${!a.is_default ? `<button onclick="setDefault('${a.id}')" class="text-indigo-600 hover:text-indigo-800">Set Default</button>` : ''}
+                <button onclick='showAddressForm(${JSON.stringify(a)})' class="text-gray-600 hover:text-gray-800">Edit</button>
+                <button onclick="deleteAddress('${a.id}')" class="text-red-600 hover:text-red-800">Delete</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function setDefault(id) {
+    const res = await api(`/api/addresses/${id}/default`, { method: 'PUT' });
+    if (res) { showAlert('success', 'Default address updated'); loadAddresses(); }
+}
+
+async function deleteAddress(id) {
+    if (!confirm('Delete this address?')) return;
+    const res = await api(`/api/addresses/${id}`, { method: 'DELETE' });
+    if (res) { showAlert('success', 'Address deleted'); loadAddresses(); }
+}
+
+loadAddresses();
+</script>
+{{end}}

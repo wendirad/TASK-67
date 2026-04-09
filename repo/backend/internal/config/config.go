@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 )
@@ -61,7 +62,7 @@ func Load() (*Config, error) {
 
 	cfg.DatabaseURL = fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName,
+		cfg.DBUser, url.QueryEscape(cfg.DBPassword), cfg.DBHost, cfg.DBPort, cfg.DBName,
 	)
 
 	return cfg, nil

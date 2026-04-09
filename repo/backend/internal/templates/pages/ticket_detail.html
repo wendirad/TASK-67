@@ -1,0 +1,84 @@
+{{define "content"}}
+<div>
+    <div class="mb-4"><a href="/tickets" class="text-indigo-600 hover:text-indigo-800 text-sm">&larr; Back to Tickets</a></div>
+    <div id="ticket-detail"><div class="skeleton h-64 rounded-lg"></div></div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+async function loadTicket() {
+    const id = window.location.pathname.split('/').pop();
+    const res = await api(`/api/tickets/${id}`);
+    if (!res) return;
+    const t = res.data;
+    const isStaff = currentUser && ['staff','moderator','admin'].includes(currentUser.role);
+
+    document.getElementById('ticket-detail').innerHTML = `
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h1 class="text-2xl font-bold">${t.ticket_number} - ${t.subject}</h1>
+                    <p class="text-sm text-gray-500 mt-1">${t.category} | Priority: ${t.priority} | By: ${t.created_by_username || 'User'}</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    ${statusBadge(t.status)}
+                    ${t.assigned_to_username ? `<span class="text-sm text-gray-500">Assigned: ${t.assigned_to_username}</span>` : ''}
+                </div>
+            </div>
+            <p class="text-gray-700 whitespace-pre-wrap">${t.description}</p>
+            <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-500">
+                <div><strong>Created:</strong> ${formatDateTime(t.created_at)}</div>
+                <div><strong>SLA Response:</strong> ${t.sla_response_met === false ? '<span class="text-red-600">Breached</span>' : t.sla_response_met === true ? '<span class="text-green-600">Met</span>' : 'Pending'}</div>
+                <div><strong>SLA Resolution:</strong> ${t.sla_resolution_met === false ? '<span class="text-red-600">Breached</span>' : t.sla_resolution_met === true ? '<span class="text-green-600">Met</span>' : 'Pending'}</div>
+                ${t.resolved_at ? `<div><strong>Resolved:</strong> ${formatDateTime(t.resolved_at)}</div>` : ''}
+            </div>
+            ${isStaff ? `
+            <div class="mt-4 flex space-x-2">
+                ${['open','assigned'].includes(t.status) ? `<button onclick="updateTicketStatus('${t.id}','in_progress')" class="px-3 py-1 bg-yellow-500 text-white rounded text-sm">Start Progress</button>` : ''}
+                ${t.status === 'in_progress' ? `<button onclick="updateTicketStatus('${t.id}','resolved')" class="px-3 py-1 bg-green-600 text-white rounded text-sm">Resolve</button>` : ''}
+                ${t.status !== 'closed' ? `<button onclick="updateTicketStatus('${t.id}','closed')" class="px-3 py-1 bg-gray-600 text-white rounded text-sm">Close</button>` : ''}
+                ${!t.assigned_to ? `<button onclick="assignTicket('${t.id}')" class="px-3 py-1 bg-indigo-600 text-white rounded text-sm">Assign to Me</button>` : ''}
+            </div>` : ''}
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium mb-4">Comments</h3>
+            <div id="comments-list" class="space-y-3 mb-4">
+                ${(t.comments || []).map(c => `
+                    <div class="border-l-2 border-gray-200 pl-4">
+                        <p class="text-sm font-medium">${c.display_name || c.username || 'User'} <span class="text-gray-400 font-normal">${formatDateTime(c.created_at)}</span></p>
+                        <p class="text-sm text-gray-700 mt-1">${c.body}</p>
+                    </div>
+                `).join('') || '<p class="text-gray-500 text-sm">No comments yet</p>'}
+            </div>
+            ${t.status !== 'closed' ? `
+            <form id="comment-form" class="flex space-x-2">
+                <input id="comment-body" class="flex-1 px-3 py-2 border rounded-md text-sm" placeholder="Add a comment..." required>
+                <button type="submit" id="comment-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700">Comment</button>
+            </form>` : ''}
+        </div>`;
+
+    document.getElementById('comment-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = document.getElementById('comment-body').value;
+        const res = await apiSubmit(`/api/tickets/${id}/comments`, { body }, document.getElementById('comment-btn'), 'Comment');
+        if (res) { document.getElementById('comment-body').value = ''; loadTicket(); }
+    });
+}
+
+async function updateTicketStatus(id, status) {
+    const res = await api(`/api/tickets/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+    if (res) { showAlert('success', 'Status updated'); loadTicket(); }
+}
+
+async function assignTicket(id) {
+    const user = currentUser;
+    if (!user) return;
+    const res = await api(`/api/tickets/${id}/assign`, { method: 'PUT', body: JSON.stringify({ assigned_to: user.id }) });
+    if (res) { showAlert('success', 'Ticket assigned'); loadTicket(); }
+}
+
+loadCurrentUser().then(() => loadTicket());
+</script>
+{{end}}

@@ -1,0 +1,90 @@
+{{define "content"}}
+<div>
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">User Management</h1>
+        <button onclick="showCreateUser()" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">Create User</button>
+    </div>
+    <div id="create-user-form" class="hidden mb-6 bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-medium mb-4">Create User</h3>
+        <form id="user-form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label class="block text-sm font-medium text-gray-700">Username</label><input id="new-username" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Password</label><input id="new-password" type="password" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Display Name</label><input id="new-display-name" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm" required></div>
+            <div><label class="block text-sm font-medium text-gray-700">Role</label>
+                <select id="new-role" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+                    <option value="member">Member</option>
+                    <option value="staff">Staff</option>
+                    <option value="moderator">Moderator</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div><label class="block text-sm font-medium text-gray-700">Email</label><input id="new-email" type="email" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700">Phone</label><input id="new-phone" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm"></div>
+            <div class="md:col-span-2 flex justify-end space-x-2">
+                <button type="button" onclick="document.getElementById('create-user-form').classList.add('hidden')" class="px-4 py-2 border rounded-md text-sm">Cancel</button>
+                <button type="submit" id="create-user-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm">Create</button>
+            </div>
+        </form>
+    </div>
+    <div id="users-list"><div class="skeleton h-16 rounded mb-2"></div></div>
+    <div id="users-pagination"></div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function showCreateUser() { document.getElementById('create-user-form').classList.remove('hidden'); }
+
+document.getElementById('user-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const res = await apiSubmit('/api/admin/users', {
+        username: document.getElementById('new-username').value,
+        password: document.getElementById('new-password').value,
+        display_name: document.getElementById('new-display-name').value,
+        role: document.getElementById('new-role').value,
+        email: document.getElementById('new-email').value,
+        phone: document.getElementById('new-phone').value,
+    }, document.getElementById('create-user-btn'), 'Create');
+    if (res) { document.getElementById('create-user-form').classList.add('hidden'); document.getElementById('user-form').reset(); loadUsers(1); }
+});
+
+async function loadUsers(page) {
+    const res = await api(`/api/admin/users?page=${page || 1}&page_size=20`);
+    if (!res) return;
+    const items = res.data?.items || [];
+    const el = document.getElementById('users-list');
+    if (!items.length) { el.innerHTML = '<p class="text-gray-500">No users found.</p>'; return; }
+
+    el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-x-auto"><table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50"><tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Username</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Display Name</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-200">
+            ${items.map(u => `<tr>
+                <td class="px-4 py-3 text-sm">${u.username}</td>
+                <td class="px-4 py-3 text-sm">${u.display_name}</td>
+                <td class="px-4 py-3">${statusBadge(u.role)}</td>
+                <td class="px-4 py-3">${statusBadge(u.status)}</td>
+                <td class="px-4 py-3 text-sm space-x-2">
+                    ${u.status === 'active' ? `<button onclick="updateUserStatus('${u.id}','suspended')" class="text-yellow-600 hover:text-yellow-800">Suspend</button>` : ''}
+                    ${u.status === 'active' ? `<button onclick="updateUserStatus('${u.id}','banned')" class="text-red-600 hover:text-red-800">Ban</button>` : ''}
+                    ${u.status !== 'active' ? `<button onclick="updateUserStatus('${u.id}','active')" class="text-green-600 hover:text-green-800">Activate</button>` : ''}
+                </td>
+            </tr>`).join('')}
+        </tbody></table></div>`;
+    document.getElementById('users-pagination').innerHTML = renderPagination(res.data, 'loadUsers');
+}
+
+async function updateUserStatus(id, status) {
+    if (!confirm(`Set user status to ${status}?`)) return;
+    const res = await api(`/api/admin/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+    if (res) { showAlert('success', 'Status updated'); loadUsers(1); }
+}
+
+loadUsers(1);
+</script>
+{{end}}

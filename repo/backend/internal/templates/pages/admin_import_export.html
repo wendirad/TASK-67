@@ -1,0 +1,78 @@
+{{define "content"}}
+<div>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">Import / Export</h1>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium mb-4">Import</h3>
+            <form id="import-form" class="space-y-4" enctype="multipart/form-data">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Entity Type</label>
+                    <select id="import-entity" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+                        <option value="users">Users</option>
+                        <option value="sessions">Sessions</option>
+                        <option value="products">Products</option>
+                        <option value="registrations">Registrations</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">CSV File</label>
+                    <input type="file" id="import-file" accept=".csv" class="mt-1 block w-full text-sm" required>
+                </div>
+                <button type="submit" id="import-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm">Import</button>
+            </form>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-medium mb-4">Export</h3>
+            <form id="export-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Entity Type</label>
+                    <select id="export-entity" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+                        <option value="users">Users</option>
+                        <option value="sessions">Sessions</option>
+                        <option value="products">Products</option>
+                        <option value="orders">Orders</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Format</label>
+                    <select id="export-format" class="mt-1 block w-full px-3 py-2 border rounded-md text-sm">
+                        <option value="csv">CSV</option>
+                    </select>
+                </div>
+                <button type="submit" id="export-btn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm">Export</button>
+            </form>
+        </div>
+    </div>
+    <div class="mt-6">
+        <h3 class="text-lg font-medium mb-4">Recent Jobs</h3>
+        <div id="jobs-list"><div class="skeleton h-16 rounded"></div></div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+document.getElementById('import-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('import-btn');
+    btn.disabled = true; btn.textContent = 'Importing...';
+    const form = new FormData();
+    form.append('entity_type', document.getElementById('import-entity').value);
+    form.append('file', document.getElementById('import-file').files[0]);
+    try {
+        const res = await fetch('/api/import', { method: 'POST', body: form, credentials: 'include' });
+        const data = await res.json();
+        if (res.ok) { showAlert('success', data.msg || 'Import started'); } else { showAlert('error', data.msg || 'Import failed'); }
+    } catch { showAlert('error', 'Network error'); }
+    finally { btn.disabled = false; btn.textContent = 'Import'; }
+});
+
+document.getElementById('export-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const entity = document.getElementById('export-entity').value;
+    const format = document.getElementById('export-format').value;
+    const res = await api(`/api/export?entity_type=${entity}&format=${format}`);
+    if (res) showAlert('success', res.msg || 'Export started');
+});
+</script>
+{{end}}

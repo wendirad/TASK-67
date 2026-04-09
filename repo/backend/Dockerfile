@@ -15,6 +15,7 @@ COPY --from=builder /app/worker .
 COPY --from=builder /app/entrypoint.sh .
 RUN chmod +x ./entrypoint.sh
 COPY --from=builder /app/internal/database/migrations ./migrations
+COPY --from=builder /app/internal/templates ./templates
 EXPOSE 8080
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["server"]

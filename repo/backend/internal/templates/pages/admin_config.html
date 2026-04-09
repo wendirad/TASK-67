@@ -1,0 +1,111 @@
+{{define "content"}}
+<div>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">Configuration</h1>
+    <div class="mb-4">
+        <div class="flex space-x-2">
+            <button onclick="showTab('config')" id="tab-config" class="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm">Config</button>
+            <button onclick="showTab('canary')" id="tab-canary" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md text-sm">Canary</button>
+            <button onclick="showTab('audit')" id="tab-audit" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md text-sm">Audit Logs</button>
+        </div>
+    </div>
+    <div id="config-content"><div class="skeleton h-32 rounded-lg"></div></div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+let activeTab = 'config';
+
+function showTab(tab) {
+    activeTab = tab;
+    ['config','canary','audit'].forEach(t => {
+        document.getElementById('tab-'+t).className = t === tab ? 'px-4 py-2 bg-indigo-600 text-white rounded-md text-sm' : 'px-4 py-2 bg-gray-200 text-gray-700 rounded-md text-sm';
+    });
+    if (tab === 'config') loadConfig();
+    else if (tab === 'canary') loadCanary();
+    else loadAudit();
+}
+
+async function loadConfig() {
+    const res = await api('/api/admin/config');
+    if (!res) return;
+    const items = res.data || [];
+    const el = document.getElementById('config-content');
+    if (!items.length) { el.innerHTML = '<p class="text-gray-500">No configuration entries.</p>'; return; }
+
+    el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-x-auto"><table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50"><tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Key</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Canary %</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-200">
+            ${items.map(c => `<tr>
+                <td class="px-4 py-3 text-sm font-mono">${c.key}</td>
+                <td class="px-4 py-3 text-sm">${c.value}</td>
+                <td class="px-4 py-3 text-sm">${c.canary_percentage != null ? c.canary_percentage + '%' : '-'}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${formatDateTime(c.updated_at)}</td>
+                <td class="px-4 py-3 text-sm"><button onclick="editConfig('${c.key}', '${c.value}', ${c.canary_percentage})" class="text-indigo-600 hover:text-indigo-800">Edit</button></td>
+            </tr>`).join('')}
+        </tbody></table></div>`;
+}
+
+async function editConfig(key, value, canary) {
+    const newValue = prompt('Value:', value);
+    if (newValue === null) return;
+    const newCanary = prompt('Canary % (empty for none):', canary != null && canary !== 'null' ? canary : '');
+    const body = { value: newValue };
+    if (newCanary !== null && newCanary !== '') body.canary_percentage = parseInt(newCanary);
+    const res = await api(`/api/admin/config/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify(body) });
+    if (res) { showAlert('success', 'Config updated'); loadConfig(); }
+}
+
+async function loadCanary() {
+    const res = await api('/api/admin/config-canary');
+    if (!res) return;
+    const items = res.data || [];
+    const el = document.getElementById('config-content');
+    if (!items.length) { el.innerHTML = '<p class="text-gray-500">No canary configurations.</p>'; return; }
+
+    el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-x-auto"><table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50"><tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Key</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Canary %</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-200">
+            ${items.map(c => `<tr><td class="px-4 py-3 text-sm font-mono">${c.key}</td><td class="px-4 py-3 text-sm">${c.value}</td><td class="px-4 py-3 text-sm">${c.canary_percentage}%</td></tr>`).join('')}
+        </tbody></table></div>`;
+}
+
+async function loadAudit() {
+    const res = await api('/api/admin/config-audit-logs');
+    if (!res) return;
+    const items = res.data || [];
+    const el = document.getElementById('config-content');
+    if (!items.length) { el.innerHTML = '<p class="text-gray-500">No audit logs.</p>'; return; }
+
+    el.innerHTML = `<div class="bg-white shadow rounded-lg overflow-x-auto"><table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50"><tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Old</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">New</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">By</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-200">
+            ${items.map(l => `<tr>
+                <td class="px-4 py-3 text-sm">${l.action}</td>
+                <td class="px-4 py-3 text-xs font-mono max-w-xs truncate">${l.old_value || '-'}</td>
+                <td class="px-4 py-3 text-xs font-mono max-w-xs truncate">${l.new_value || '-'}</td>
+                <td class="px-4 py-3 text-sm">${l.performed_by || '-'}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">${formatDateTime(l.created_at)}</td>
+            </tr>`).join('')}
+        </tbody></table></div>`;
+}
+
+loadConfig();
+</script>
+{{end}}

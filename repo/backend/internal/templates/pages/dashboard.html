@@ -1,0 +1,108 @@
+{{define "content"}}
+<div>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+    <div id="dashboard-content">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="skeleton h-24 rounded-lg"></div>
+            <div class="skeleton h-24 rounded-lg"></div>
+            <div class="skeleton h-24 rounded-lg"></div>
+            <div class="skeleton h-24 rounded-lg"></div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function statCard(label, value, color) {
+    return `<div class="bg-white rounded-lg shadow p-5">
+        <p class="text-sm font-medium text-gray-500">${label}</p>
+        <p class="mt-1 text-2xl font-semibold ${color || 'text-gray-900'}">${value}</p>
+    </div>`;
+}
+
+async function loadDashboard() {
+    const user = await loadCurrentUser();
+    if (!user) return;
+    const el = document.getElementById('dashboard-content');
+
+    if (user.role === 'admin') {
+        const res = await api('/api/kpi/overview');
+        if (!res) { el.innerHTML = '<p class="text-gray-500">Failed to load dashboard</p>'; return; }
+        const d = res.data;
+        el.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                ${statCard('Total Members', d.total_members || 0)}
+                ${statCard('Active Sessions', d.active_sessions || 0)}
+                ${statCard('Open Tickets', d.open_tickets || 0, 'text-yellow-600')}
+                ${statCard('Revenue (30d)', formatCents(d.revenue_30d || 0), 'text-green-600')}
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow p-5">
+                    <h3 class="text-lg font-medium mb-4">Quick Actions</h3>
+                    <div class="space-y-2">
+                        <a href="/admin/users" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">Manage Users</a>
+                        <a href="/admin/sessions" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">Manage Sessions</a>
+                        <a href="/admin/kpi" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">View KPI Reports</a>
+                        <a href="/admin/config" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">Configuration</a>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-5">
+                    <h3 class="text-lg font-medium mb-4">System Status</h3>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><span class="text-gray-600">SLA Compliance</span><span class="font-medium">${d.sla_compliance || 'N/A'}%</span></div>
+                        <div class="flex justify-between"><span class="text-gray-600">Avg Resolution Time</span><span class="font-medium">${d.avg_resolution_hours ? d.avg_resolution_hours.toFixed(1) + 'h' : 'N/A'}</span></div>
+                    </div>
+                </div>
+            </div>`;
+    } else if (user.role === 'staff') {
+        el.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow p-5">
+                    <h3 class="text-lg font-medium mb-4">Quick Actions</h3>
+                    <div class="space-y-2">
+                        <a href="/staff/shipping" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">Manage Shipping</a>
+                        <a href="/tickets" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">View Tickets</a>
+                    </div>
+                </div>
+            </div>`;
+    } else if (user.role === 'moderator') {
+        el.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow p-5">
+                    <h3 class="text-lg font-medium mb-4">Quick Actions</h3>
+                    <div class="space-y-2">
+                        <a href="/moderation" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">Moderation Queue</a>
+                        <a href="/tickets" class="block px-4 py-2 bg-gray-50 rounded hover:bg-gray-100">View Tickets</a>
+                    </div>
+                </div>
+            </div>`;
+    } else {
+        const [regRes, orderRes] = await Promise.all([
+            api('/api/registrations?page_size=5'),
+            api('/api/orders?page_size=5')
+        ]);
+        const regs = regRes?.data?.items || [];
+        const orders = orderRes?.data?.items || [];
+        el.innerHTML = `
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow p-5">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium">Recent Registrations</h3>
+                        <a href="/registrations" class="text-sm text-indigo-600 hover:text-indigo-800">View all</a>
+                    </div>
+                    ${regs.length ? regs.map(r => `<div class="flex justify-between py-2 border-b last:border-0"><span class="text-sm">${r.session_title || 'Session'}</span>${statusBadge(r.status)}</div>`).join('') : '<p class="text-gray-500 text-sm">No registrations yet</p>'}
+                </div>
+                <div class="bg-white rounded-lg shadow p-5">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium">Recent Orders</h3>
+                        <a href="/orders" class="text-sm text-indigo-600 hover:text-indigo-800">View all</a>
+                    </div>
+                    ${orders.length ? orders.map(o => `<div class="flex justify-between py-2 border-b last:border-0"><span class="text-sm">${o.order_number}</span><span class="text-sm">${formatCents(o.total_cents)}</span>${statusBadge(o.status)}</div>`).join('') : '<p class="text-gray-500 text-sm">No orders yet</p>'}
+                </div>
+            </div>`;
+    }
+}
+loadDashboard();
+</script>
+{{end}}

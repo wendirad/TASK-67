@@ -74,6 +74,27 @@ services:
       backend:
         condition: service_started
 
+  test-runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test
+    environment:
+      SECRETS_PATH: /run/secrets
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: campusrec
+      DB_USER: campusrec
+      API_BASE_URL: http://backend:8080
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_healthy
+    volumes:
+      - secrets:/run/secrets:ro
+    profiles:
+      - test
+
 volumes:
   pgdata:
   backups:
