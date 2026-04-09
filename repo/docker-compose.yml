@@ -1,0 +1,81 @@
+services:
+  init-secrets:
+    build: ./scripts/init-secrets
+    volumes:
+      - secrets:/run/secrets
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: campusrec
+      POSTGRES_USER: campusrec
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campusrec -d campusrec"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      SECRETS_PATH: /run/secrets
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: campusrec
+      DB_USER: campusrec
+      SERVER_PORT: "8080"
+      GIN_MODE: release
+      BACKUP_PATH: /backups
+      LOG_LEVEL: info
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - backups:/backups
+      - secrets:/run/secrets
+    command: ["server"]
+
+  worker:
+    build: ./backend
+    environment:
+      SECRETS_PATH: /run/secrets
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: campusrec
+      DB_USER: campusrec
+      BACKUP_PATH: /backups
+      LOG_LEVEL: info
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - backups:/backups
+      - secrets:/run/secrets:ro
+    command: ["worker"]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  pgdata:
+  backups:
+  secrets:
+  wal_archive:
