@@ -125,6 +125,40 @@ func TestPaymentCallbackEndToEnd(t *testing.T) {
 	}
 }
 
+// TestPaymentCallbackSignatureNotLeaked verifies that the API response on
+// signature mismatch does not expose valid signatures or verification material.
+func TestPaymentCallbackSignatureNotLeaked(t *testing.T) {
+	c := newClient(t)
+
+	forgedSig := "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888"
+	resp := c.post("/api/payments/callback", map[string]interface{}{
+		"transaction_id": "FAKE-TXN-LEAK-TEST",
+		"order_number":   "ORD-99999999-00002",
+		"amount_cents":   1000,
+		"status":         "SUCCESS",
+		"nonce_str":      "nonce-leak-test",
+		"sign":           forgedSig,
+	})
+
+	if resp.Code == 200 {
+		t.Fatal("Expected callback with forged signature to fail")
+	}
+
+	// The response message must be a generic error, not contain any signature
+	if strings.Contains(resp.Msg, forgedSig) {
+		t.Error("Response message must not echo back the submitted signature")
+	}
+	if strings.Contains(resp.Msg, "expected") {
+		t.Error("Response message must not contain 'expected' signature hint")
+	}
+
+	// The response must not contain hex strings that could be signatures (64 hex chars)
+	// The generic message "Invalid callback signature" is the only acceptable content
+	if resp.Msg != "Invalid callback signature" {
+		t.Errorf("Expected generic error message, got %q", resp.Msg)
+	}
+}
+
 func TestPaymentCallbackNonSuccessStatus(t *testing.T) {
 	c := newClient(t)
 	resp := c.post("/api/payments/callback", map[string]interface{}{

@@ -31,7 +31,7 @@ templ RegistrationsPage() {
 						<td class="px-4 py-3 text-sm text-gray-500">${formatDate(r.created_at)}</td>
 						<td class="px-4 py-3 text-sm space-x-2">
 							${r.status === 'approved' ? `<button onclick="confirmReg('${r.id}')" class="text-green-600 hover:text-green-800">Confirm</button>` : ''}
-							${['pending','approved','registered'].includes(r.status) ? `<button onclick="cancelReg('${r.id}')" class="text-red-600 hover:text-red-800">Cancel</button>` : ''}
+							${['pending','approved','registered','waitlisted'].includes(r.status) ? `<button onclick="cancelReg('${r.id}')" class="text-red-600 hover:text-red-800">Cancel</button>` : ''}
 						</td>
 					</tr>`).join('')}
 				</tbody></table></div>`;

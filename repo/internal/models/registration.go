@@ -18,3 +18,25 @@ type Registration struct {
 	Username     *string    `json:"username,omitempty"`
 	DisplayName  *string    `json:"display_name,omitempty"`
 }
+
+// IsRegistrationCancelable returns true if a registration in the given status
+// can be canceled by the user.
+func IsRegistrationCancelable(status string) bool {
+	switch status {
+	case "pending", "approved", "registered", "waitlisted":
+		return true
+	}
+	return false
+}
+
+// IsRegistrationApprovable returns true if a registration in the given status
+// can be approved by an admin.
+func IsRegistrationApprovable(status string) bool {
+	return status == "pending"
+}
+
+// IsRegistrationConfirmable returns true if a registration in the given status
+// can be confirmed by the user.
+func IsRegistrationConfirmable(status string) bool {
+	return status == "approved"
+}

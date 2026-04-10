@@ -21,11 +21,14 @@ func NewOrderRepository(db *sql.DB) *OrderRepository {
 
 // CreateOrder creates an order with items and payment record in a single transaction.
 // It atomically deducts stock and snapshots the shipping address.
+// paymentTimeoutMinutes controls the payment deadline; callers should resolve
+// this from the canary-aware config before calling.
 func (r *OrderRepository) CreateOrder(
 	userID string,
 	items []models.CreateOrderItem,
 	products map[string]*models.Product,
 	address *models.Address,
+	paymentTimeoutMinutes int,
 ) (*models.Order, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -50,14 +53,10 @@ func (r *OrderRepository) CreateOrder(
 	}
 
 	// Compute total
-	totalCents := 0
-	for _, item := range items {
-		p := products[item.ProductID]
-		totalCents += p.PriceCents * item.Quantity
-	}
+	totalCents := models.OrderTotalCents(items, products)
 
-	// Set payment deadline (15 minutes)
-	paymentDeadline := time.Now().Add(15 * time.Minute)
+	// Set payment deadline from canary-aware config
+	paymentDeadline := time.Now().Add(time.Duration(paymentTimeoutMinutes) * time.Minute)
 
 	// Create order
 	order := &models.Order{
@@ -479,7 +478,7 @@ func (r *OrderRepository) CloseExpiredOrder(orderID string) (bool, error) {
 
 	result, err := tx.Exec(`
 		UPDATE orders SET status = 'closed', closed_at = NOW(),
-		    close_reason = 'Payment timeout - 15 minute deadline exceeded',
+		    close_reason = 'Payment timeout - deadline exceeded',
 		    updated_at = NOW()
 		WHERE id = $1 AND status = 'pending_payment'
 	`, orderID)

@@ -197,6 +197,17 @@ func (s *ImportExportService) Export(userID, entityType, format, filters string)
 		return nil, 400, "Export format must be 'csv' or 'xlsx'"
 	}
 
+	// Validate filters if provided
+	if filters != "" {
+		parsed, err := models.ParseExportFilters(filters)
+		if err != nil {
+			return nil, 400, "Invalid filters: must be valid JSON"
+		}
+		if msg := models.ValidateExportFilters(entityType, parsed); msg != "" {
+			return nil, 400, msg
+		}
+	}
+
 	payload := ExportPayload{
 		EntityType: entityType,
 		Format:     format,

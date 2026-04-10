@@ -7,7 +7,73 @@ templ CheckoutPage() {
 			<div id="checkout-content"><div class="skeleton h-64 rounded-lg"></div></div>
 		</div>
 		<script>
+		function getCheckoutParams() {
+			const params = new URLSearchParams(window.location.search);
+			const productId = params.get('buy_now');
+			const qty = parseInt(params.get('qty')) || 1;
+			if (productId) return { mode: 'buy_now', productId, qty };
+			return { mode: 'cart' };
+		}
 		async function loadCheckout() {
+			const params = getCheckoutParams();
+			if (params.mode === 'buy_now') {
+				await loadBuyNowCheckout(params.productId, params.qty);
+			} else {
+				await loadCartCheckout();
+			}
+		}
+		async function loadBuyNowCheckout(productId, qty) {
+			const [prodRes, addrRes] = await Promise.all([
+				api(`/api/products/${productId}`),
+				api('/api/addresses')
+			]);
+			const el = document.getElementById('checkout-content');
+			if (!prodRes || !prodRes.data) {
+				el.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-500">Product not found</p><a href="/catalog" class="text-indigo-600 mt-2 inline-block">Browse Catalog</a></div>';
+				return;
+			}
+			const p = prodRes.data;
+			const addresses = addrRes?.data?.items || addrRes?.data || [];
+			if (p.status !== 'active') {
+				el.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-500">This product is no longer available</p><a href="/catalog" class="text-indigo-600 mt-2 inline-block">Browse Catalog</a></div>';
+				return;
+			}
+			if (p.stock_quantity < qty) {
+				el.innerHTML = `<div class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-500">Insufficient stock (available: ${p.stock_quantity})</p><a href="/products/${productId}" class="text-indigo-600 mt-2 inline-block">Back to Product</a></div>`;
+				return;
+			}
+			const total = p.price_cents * qty;
+			const defaultAddr = addresses.find(a => a.is_default) || addresses[0];
+			const needsAddress = p.is_shippable;
+			el.innerHTML = `
+				<div class="bg-white rounded-lg shadow p-6 mb-6">
+					<h3 class="font-medium mb-3">Order Summary</h3>
+					<div class="flex justify-between py-2 border-b">
+						<span class="text-sm">${p.name} x${qty}</span>
+						<span class="text-sm">${formatCents(total)}</span>
+					</div>
+					<div class="flex justify-between py-2 font-bold">
+						<span>Total</span><span>${formatCents(total)}</span>
+					</div>
+				</div>
+				${needsAddress ? `
+					<div class="bg-white rounded-lg shadow p-6 mb-6">
+						<h3 class="font-medium mb-3">Shipping Address</h3>
+						${addresses.length ? `
+							<select id="checkout-address" class="w-full px-3 py-2 border rounded-md text-sm">
+								${addresses.map(a => `<option value="${a.id}" ${a.id === defaultAddr?.id ? 'selected' : ''}>${a.recipient_name} - ${a.address_line1}, ${a.city}</option>`).join('')}
+							</select>
+						` : '<p class="text-gray-500 text-sm">No addresses. <a href="/addresses" class="text-indigo-600">Add one first</a></p>'}
+					</div>
+				` : ''}
+				<button onclick="placeBuyNowOrder('${p.id}', ${qty})" id="place-order-btn"
+					class="w-full px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium"
+					${needsAddress && !addresses.length ? 'disabled' : ''}>
+					Buy Now
+				</button>
+				<a href="/products/${p.id}" class="block text-center text-sm text-gray-500 hover:text-gray-700 mt-3">Back to Product</a>`;
+		}
+		async function loadCartCheckout() {
 			const [cartRes, addrRes] = await Promise.all([api('/api/cart'), api('/api/addresses')]);
 			if (!cartRes) return;
 			const items = cartRes.data?.items || cartRes.data || [];
@@ -33,11 +99,22 @@ templ CheckoutPage() {
 						</select>
 					` : '<p class="text-gray-500 text-sm">No addresses. <a href="/addresses" class="text-indigo-600">Add one first</a></p>'}
 				</div>
-				<button onclick="placeOrder()" id="place-order-btn" class="w-full px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium" ${!addresses.length ? 'disabled' : ''}>
+				<button onclick="placeCartOrder()" id="place-order-btn" class="w-full px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium" ${!addresses.length ? 'disabled' : ''}>
 					Place Order
 				</button>`;
 		}
-		async function placeOrder() {
+		async function placeBuyNowOrder(productId, qty) {
+			const addrEl = document.getElementById('checkout-address');
+			const btn = document.getElementById('place-order-btn');
+			const body = {
+				items: [{ product_id: productId, quantity: qty }],
+				shipping_address_id: addrEl?.value || null,
+				source: 'buy_now'
+			};
+			const res = await apiSubmit('/api/orders', body, btn, 'Buy Now');
+			if (res?.data?.id) { window.location.href = `/orders/${res.data.id}`; }
+		}
+		async function placeCartOrder() {
 			const addrEl = document.getElementById('checkout-address');
 			const btn = document.getElementById('place-order-btn');
 			const cartRes = await api('/api/cart');

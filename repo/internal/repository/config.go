@@ -107,6 +107,37 @@ func (r *ConfigRepository) ListCanary() ([]models.ConfigEntry, error) {
 	return entries, rows.Err()
 }
 
+// GetIntForCohort returns the integer config value if the user's canary cohort
+// falls within the canary_percentage, otherwise returns defaultVal.
+// If canary_percentage is NULL the value applies to everyone.
+func (r *ConfigRepository) GetIntForCohort(key string, defaultVal, userCohort int) int {
+	var val string
+	var canaryPct *int
+	err := r.db.QueryRow(`SELECT value, canary_percentage FROM config_entries WHERE key = $1`, key).Scan(&val, &canaryPct)
+	if err != nil {
+		return defaultVal
+	}
+	// If no canary gating, value applies to all users
+	if canaryPct == nil {
+		n := 0
+		fmt.Sscanf(val, "%d", &n)
+		if n <= 0 {
+			return defaultVal
+		}
+		return n
+	}
+	// User outside canary rollout gets the default
+	if userCohort < 0 || userCohort >= *canaryPct {
+		return defaultVal
+	}
+	n := 0
+	fmt.Sscanf(val, "%d", &n)
+	if n <= 0 {
+		return defaultVal
+	}
+	return n
+}
+
 // ListAuditLogs returns recent audit logs for a given entity.
 func (r *ConfigRepository) ListAuditLogs(entityType string, limit int) ([]models.AuditLog, error) {
 	rows, err := r.db.Query(`

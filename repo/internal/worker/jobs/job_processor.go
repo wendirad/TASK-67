@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
+
+	"campusrec/internal/models"
 
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
@@ -36,13 +39,24 @@ type ExportPayload struct {
 }
 
 // JobProcessor picks up pending jobs and processes them.
+// Job pickup uses a CTE with FOR UPDATE SKIP LOCKED to atomically claim jobs,
+// preventing duplicate execution under concurrent workers.
 func JobProcessor(db *sql.DB) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		// Pick pending jobs (no SKIP LOCKED here since we're single-worker with advisory lock)
+		// Atomically claim pending jobs: SELECT + UPDATE in a single CTE.
+		// FOR UPDATE SKIP LOCKED ensures no two workers claim the same job,
+		// even if advisory locks fail or multiple worker instances start.
 		rows, err := db.QueryContext(ctx, `
-			SELECT id, type, payload FROM jobs
-			WHERE status = 'pending' AND scheduled_at <= NOW()
-			ORDER BY created_at LIMIT 5
+			WITH picked AS (
+				SELECT id FROM jobs
+				WHERE status = 'pending' AND scheduled_at <= NOW()
+				ORDER BY created_at
+				LIMIT 5
+				FOR UPDATE SKIP LOCKED
+			)
+			UPDATE jobs SET status = 'processing', started_at = NOW(), attempts = attempts + 1
+			FROM picked WHERE jobs.id = picked.id
+			RETURNING jobs.id, jobs.type, jobs.payload
 		`)
 		if err != nil {
 			return err
@@ -54,31 +68,21 @@ func JobProcessor(db *sql.DB) func(ctx context.Context) error {
 			Type    string
 			Payload *string
 		}
-		var pending []jobEntry
+		var claimed []jobEntry
 		for rows.Next() {
 			var j jobEntry
 			if err := rows.Scan(&j.ID, &j.Type, &j.Payload); err != nil {
 				return err
 			}
-			pending = append(pending, j)
+			claimed = append(claimed, j)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
 
-		for _, j := range pending {
+		for _, j := range claimed {
 			if ctx.Err() != nil {
 				return ctx.Err()
-			}
-
-			// Mark as processing
-			_, err := db.ExecContext(ctx, `
-				UPDATE jobs SET status = 'processing', started_at = NOW(), attempts = attempts + 1
-				WHERE id = $1 AND status = 'pending'
-			`, j.ID)
-			if err != nil {
-				log.Printf("Job processor: failed to start job %s: %v", j.ID, err)
-				continue
 			}
 
 			var result string
@@ -328,45 +332,54 @@ func processExport(ctx context.Context, db *sql.DB, payloadStr string) (string, 
 		return "", fmt.Errorf("parse export payload: %w", err)
 	}
 
+	filters, err := models.ParseExportFilters(payload.Filters)
+	if err != nil {
+		return "", fmt.Errorf("parse filters: %w", err)
+	}
+
 	var headers []string
 	var rows [][]string
-	var err error
 
 	switch payload.EntityType {
 	case "users":
 		headers = []string{"id", "username", "role", "display_name", "status", "created_at"}
+		where, args := buildUserFilters(filters)
 		rows, err = queryExport(ctx, db, `
-			SELECT id::text, username, role, display_name, status, created_at::text FROM users ORDER BY created_at
-		`)
+			SELECT id::text, username, role, display_name, status, created_at::text FROM users`+where+` ORDER BY created_at
+		`, args...)
 	case "products":
 		headers = []string{"id", "name", "category", "price_cents", "stock_quantity", "is_shippable", "status"}
+		where, args := buildProductFilters(filters)
 		rows, err = queryExport(ctx, db, `
-			SELECT id::text, name, category, price_cents::text, stock_quantity::text, is_shippable::text, status FROM products ORDER BY name
-		`)
+			SELECT id::text, name, category, price_cents::text, stock_quantity::text, is_shippable::text, status FROM products`+where+` ORDER BY name
+		`, args...)
 	case "sessions":
 		headers = []string{"id", "title", "facility", "coach_name", "start_time", "end_time", "total_seats", "status"}
+		where, args := buildSessionFilters(filters)
 		rows, err = queryExport(ctx, db, `
 			SELECT s.id::text, s.title, f.name, COALESCE(s.coach_name, ''), s.start_time::text, s.end_time::text, s.total_seats::text, s.status
-			FROM sessions s JOIN facilities f ON f.id = s.facility_id ORDER BY s.start_time
-		`)
+			FROM sessions s JOIN facilities f ON f.id = s.facility_id`+where+` ORDER BY s.start_time
+		`, args...)
 	case "orders":
 		headers = []string{"id", "order_number", "user", "total_cents", "status", "created_at"}
+		where, args := buildOrderFilters(filters)
 		rows, err = queryExport(ctx, db, `
 			SELECT o.id::text, o.order_number, u.username, o.total_cents::text, o.status, o.created_at::text
-			FROM orders o JOIN users u ON u.id = o.user_id ORDER BY o.created_at
-		`)
+			FROM orders o JOIN users u ON u.id = o.user_id`+where+` ORDER BY o.created_at
+		`, args...)
 	case "registrations":
 		headers = []string{"id", "username", "session_title", "status", "created_at"}
+		where, args := buildRegistrationFilters(filters)
 		rows, err = queryExport(ctx, db, `
 			SELECT r.id::text, u.username, s.title, r.status, r.created_at::text
-			FROM registrations r JOIN users u ON u.id = r.user_id JOIN sessions s ON s.id = r.session_id
-			ORDER BY r.created_at
-		`)
+			FROM registrations r JOIN users u ON u.id = r.user_id JOIN sessions s ON s.id = r.session_id`+where+` ORDER BY r.created_at
+		`, args...)
 	case "tickets":
 		headers = []string{"ticket_number", "type", "subject", "status", "priority", "created_at"}
+		where, args := buildTicketFilters(filters)
 		rows, err = queryExport(ctx, db, `
-			SELECT ticket_number, type, subject, status, priority, created_at::text FROM tickets ORDER BY created_at
-		`)
+			SELECT ticket_number, type, subject, status, priority, created_at::text FROM tickets`+where+` ORDER BY created_at
+		`, args...)
 	default:
 		return "", fmt.Errorf("unsupported export entity: %s", payload.EntityType)
 	}
@@ -420,8 +433,8 @@ func processExport(ctx context.Context, db *sql.DB, payloadStr string) (string, 
 	return string(resultJSON), nil
 }
 
-func queryExport(ctx context.Context, db *sql.DB, query string) ([][]string, error) {
-	rows, err := db.QueryContext(ctx, query)
+func queryExport(ctx context.Context, db *sql.DB, query string, args ...interface{}) ([][]string, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +464,105 @@ func queryExport(ctx context.Context, db *sql.DB, query string) ([][]string, err
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+// filterBuilder accumulates WHERE conditions and parameterized args.
+type filterBuilder struct {
+	conditions []string
+	args       []interface{}
+	argIdx     int
+}
+
+func newFilterBuilder() *filterBuilder {
+	return &filterBuilder{argIdx: 1}
+}
+
+func (fb *filterBuilder) add(condition string, value interface{}) {
+	fb.conditions = append(fb.conditions, fmt.Sprintf(condition, fb.argIdx))
+	fb.args = append(fb.args, value)
+	fb.argIdx++
+}
+
+func (fb *filterBuilder) build() (string, []interface{}) {
+	if len(fb.conditions) == 0 {
+		return "", nil
+	}
+	return " WHERE " + strings.Join(fb.conditions, " AND "), fb.args
+}
+
+func addDateFilters(fb *filterBuilder, filters *models.ExportFilters, dateColumn string) {
+	if filters.DateFrom != "" {
+		fb.add(dateColumn+" >= $%d", filters.DateFrom)
+	}
+	if filters.DateTo != "" {
+		fb.add(dateColumn+" < ($%d::date + INTERVAL '1 day')", filters.DateTo)
+	}
+}
+
+func buildUserFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("status = $%d", filters.Status)
+	}
+	if filters.Role != "" {
+		fb.add("role = $%d", filters.Role)
+	}
+	addDateFilters(fb, filters, "created_at")
+	return fb.build()
+}
+
+func buildProductFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("status = $%d", filters.Status)
+	}
+	if filters.Category != "" {
+		fb.add("category = $%d", filters.Category)
+	}
+	addDateFilters(fb, filters, "created_at")
+	return fb.build()
+}
+
+func buildSessionFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("s.status = $%d", filters.Status)
+	}
+	addDateFilters(fb, filters, "s.start_time")
+	return fb.build()
+}
+
+func buildOrderFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("o.status = $%d", filters.Status)
+	}
+	addDateFilters(fb, filters, "o.created_at")
+	return fb.build()
+}
+
+func buildRegistrationFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("r.status = $%d", filters.Status)
+	}
+	addDateFilters(fb, filters, "r.created_at")
+	return fb.build()
+}
+
+func buildTicketFilters(filters *models.ExportFilters) (string, []interface{}) {
+	fb := newFilterBuilder()
+	if filters.Status != "" {
+		fb.add("status = $%d", filters.Status)
+	}
+	if filters.Type != "" {
+		fb.add("type = $%d", filters.Type)
+	}
+	if filters.Priority != "" {
+		fb.add("priority = $%d", filters.Priority)
+	}
+	addDateFilters(fb, filters, "created_at")
+	return fb.build()
 }
 
 func lookupRegCloseDefault(ctx context.Context, tx *sql.Tx) int {

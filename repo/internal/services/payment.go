@@ -49,7 +49,7 @@ func (s *PaymentService) ProcessCallback(req *PaymentCallbackRequest) (int, stri
 	// Verify HMAC-SHA256 signature
 	expectedSign := ComputeCallbackSignature(req.TransactionID, req.OrderNumber, req.AmountCents, req.Status, req.NonceStr, s.merchantKey)
 	if !hmac.Equal([]byte(req.Sign), []byte(expectedSign)) {
-		log.Printf("Payment callback signature mismatch for order %s: expected=%s got=%s", req.OrderNumber, expectedSign, req.Sign)
+		log.Printf("Payment callback signature mismatch for order %s", req.OrderNumber)
 		return 403, "Invalid callback signature"
 	}
 

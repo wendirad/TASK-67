@@ -24,3 +24,24 @@ type AuditLog struct {
 	IPAddress   *string   `json:"ip_address,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+// AuditLogDMLAllowed returns whether the given DML operation is permitted on
+// the audit_logs table. Only INSERT is allowed; UPDATE is always blocked;
+// DELETE is only allowed after archival (enforced at DB trigger level).
+func AuditLogDMLAllowed(op string) bool {
+	return op == "INSERT"
+}
+
+// ArchiveAuditLogDMLAllowed returns whether the given DML operation is
+// permitted on the archive.audit_logs table. Only INSERT is allowed; UPDATE
+// and DELETE are always blocked (fully immutable).
+func ArchiveAuditLogDMLAllowed(op string) bool {
+	return op == "INSERT"
+}
+
+// AuditLogDeleteRequiresArchive returns true, reflecting the database trigger
+// rule that a row must exist in archive.audit_logs before it can be deleted
+// from audit_logs.
+func AuditLogDeleteRequiresArchive() bool {
+	return true
+}

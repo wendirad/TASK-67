@@ -19,12 +19,12 @@ func (r *UserRepository) FindByUsername(username string) (*models.User, error) {
 	user := &models.User{}
 	err := r.db.QueryRow(`
 		SELECT id, username, password_hash, role, display_name, email, phone, status,
-		       failed_login_attempts, locked_until, created_at, updated_at
+		       failed_login_attempts, locked_until, canary_cohort, created_at, updated_at
 		FROM users WHERE username = $1
 	`, username).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.DisplayName,
 		&user.Email, &user.Phone, &user.Status, &user.FailedLoginAttempts,
-		&user.LockedUntil, &user.CreatedAt, &user.UpdatedAt,
+		&user.LockedUntil, &user.CanaryCohort, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -39,12 +39,12 @@ func (r *UserRepository) FindByID(id string) (*models.User, error) {
 	user := &models.User{}
 	err := r.db.QueryRow(`
 		SELECT id, username, password_hash, role, display_name, email, phone, status,
-		       failed_login_attempts, locked_until, created_at, updated_at
+		       failed_login_attempts, locked_until, canary_cohort, created_at, updated_at
 		FROM users WHERE id = $1
 	`, id).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.DisplayName,
 		&user.Email, &user.Phone, &user.Status, &user.FailedLoginAttempts,
-		&user.LockedUntil, &user.CreatedAt, &user.UpdatedAt,
+		&user.LockedUntil, &user.CanaryCohort, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -86,13 +86,21 @@ func (r *UserRepository) UpdatePasswordHash(userID, hash string) error {
 }
 
 func (r *UserRepository) Create(user *models.User) error {
-	return r.db.QueryRow(`
-		INSERT INTO users (username, password_hash, role, display_name, email, phone, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-		RETURNING id, created_at, updated_at
+	// Generate UUID first so we can compute canary_cohort deterministically from the ID.
+	// The cohort is MOD(first 4 bytes of UUID interpreted as unsigned int, 100).
+	err := r.db.QueryRow(`
+		WITH new_id AS (SELECT gen_random_uuid() AS uid)
+		INSERT INTO users (id, username, password_hash, role, display_name, email, phone, status,
+		                   canary_cohort, created_at, updated_at)
+		SELECT uid, $1, $2, $3, $4, $5, $6, $7,
+		       MOD(('x' || left(replace(uid::text, '-', ''), 8))::bit(32)::int::bigint + 2147483648, 100)::int,
+		       NOW(), NOW()
+		FROM new_id
+		RETURNING id, canary_cohort, created_at, updated_at
 	`, user.Username, user.PasswordHash, user.Role, user.DisplayName,
 		user.Email, user.Phone, user.Status,
-	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.CanaryCohort, &user.CreatedAt, &user.UpdatedAt)
+	return err
 }
 
 func (r *UserRepository) UsernameExists(username string) (bool, error) {

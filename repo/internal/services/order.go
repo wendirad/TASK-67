@@ -15,6 +15,7 @@ type OrderService struct {
 	cartRepo    *repository.CartRepository
 	userRepo    *repository.UserRepository
 	auditRepo   *repository.AuditRepository
+	configRepo  *repository.ConfigRepository
 }
 
 func NewOrderService(
@@ -24,6 +25,7 @@ func NewOrderService(
 	cartRepo *repository.CartRepository,
 	userRepo *repository.UserRepository,
 	auditRepo *repository.AuditRepository,
+	configRepo *repository.ConfigRepository,
 ) *OrderService {
 	return &OrderService{
 		orderRepo:   orderRepo,
@@ -32,11 +34,13 @@ func NewOrderService(
 		cartRepo:    cartRepo,
 		userRepo:    userRepo,
 		auditRepo:   auditRepo,
+		configRepo:  configRepo,
 	}
 }
 
 // CreateOrder validates inputs, creates order with atomic stock deduction, and clears cart if source=cart.
-func (s *OrderService) CreateOrder(userID string, req *models.CreateOrderRequest) (*models.Order, int, string) {
+// canaryCohort is the user's cohort from middleware context (-1 if unset).
+func (s *OrderService) CreateOrder(userID string, req *models.CreateOrderRequest, canaryCohort int) (*models.Order, int, string) {
 	// Check ban status
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
@@ -106,8 +110,11 @@ func (s *OrderService) CreateOrder(userID string, req *models.CreateOrderRequest
 		address = addr
 	}
 
+	// Resolve canary-aware payment timeout using cohort from middleware context
+	paymentTimeout := s.configRepo.GetIntForCohort("order.payment_timeout_minutes", 15, canaryCohort)
+
 	// Create order atomically (stock deduction + order + items + payment)
-	order, err := s.orderRepo.CreateOrder(userID, req.Items, products, address)
+	order, err := s.orderRepo.CreateOrder(userID, req.Items, products, address, paymentTimeout)
 	if err != nil {
 		log.Printf("Error creating order: %v", err)
 		return nil, 422, err.Error()
@@ -172,18 +179,12 @@ func (s *OrderService) CancelOrder(orderID, userID, role string) (int, string) {
 		return 404, "Order not found"
 	}
 
-	// Members can only cancel their own pending_payment orders
-	if role != "admin" {
-		if order.UserID != userID {
-			return 403, "Not your order"
-		}
-		if order.Status != "pending_payment" {
-			return 422, "Can only cancel orders that are pending payment"
-		}
-	} else {
-		if order.Status != "pending_payment" {
-			return 422, "Can only cancel orders that are pending payment"
-		}
+	// Members can only cancel their own orders
+	if role != "admin" && order.UserID != userID {
+		return 403, "Not your order"
+	}
+	if !models.IsOrderCancelable(order.Status) {
+		return 422, "Can only cancel orders that are pending payment"
 	}
 
 	if err := s.orderRepo.CancelOrder(orderID); err != nil {
@@ -213,10 +214,7 @@ func (s *OrderService) RefundOrder(orderID, userID string) (int, string) {
 		return 404, "Order not found"
 	}
 
-	refundableStatuses := map[string]bool{
-		"paid": true, "processing": true, "shipped": true, "delivered": true, "completed": true,
-	}
-	if !refundableStatuses[order.Status] {
+	if !models.IsOrderRefundable(order.Status) {
 		return 422, "Order cannot be refunded in current state"
 	}
 

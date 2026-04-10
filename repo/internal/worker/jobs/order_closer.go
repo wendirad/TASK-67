@@ -71,7 +71,7 @@ func closeExpiredOrder(ctx context.Context, db *sql.DB, orderID string) (bool, e
 	// Close the order — capture affected row count
 	result, err := tx.ExecContext(ctx, `
 		UPDATE orders SET status = 'closed', closed_at = NOW(),
-		    close_reason = 'Payment timeout - 15 minute deadline exceeded',
+		    close_reason = 'Payment timeout - deadline exceeded',
 		    updated_at = NOW()
 		WHERE id = $1 AND status = 'pending_payment'
 	`, orderID)

@@ -32,7 +32,8 @@ func (h *PostHandler) Create(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	post, code, msg := h.postService.CreatePost(userID, req.Title, req.Content)
+	cohort := middleware.GetCanaryCohort(c)
+	post, code, msg := h.postService.CreatePost(userID, req.Title, req.Content, cohort)
 	if code != http.StatusCreated {
 		Error(c, code, msg)
 		return
@@ -72,7 +73,8 @@ func (h *PostHandler) Report(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	report, code, msg := h.postService.ReportPost(postID, userID, req.Reason)
+	cohort := middleware.GetCanaryCohort(c)
+	report, code, msg := h.postService.ReportPost(postID, userID, req.Reason, cohort)
 	if code != http.StatusCreated {
 		Error(c, code, msg)
 		return

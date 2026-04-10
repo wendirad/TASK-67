@@ -69,3 +69,29 @@ type CreateOrderItem struct {
 	ProductID string `json:"product_id"`
 	Quantity  int    `json:"quantity"`
 }
+
+// IsOrderCancelable returns true if an order in the given status can be canceled.
+func IsOrderCancelable(status string) bool {
+	return status == "pending_payment"
+}
+
+// IsOrderRefundable returns true if an order in the given status can be refunded.
+func IsOrderRefundable(status string) bool {
+	switch status {
+	case "paid", "processing", "shipped", "delivered", "completed":
+		return true
+	}
+	return false
+}
+
+// OrderTotalCents computes the order total from a slice of items and a product
+// lookup map keyed by product ID.
+func OrderTotalCents(items []CreateOrderItem, products map[string]*Product) int {
+	total := 0
+	for _, item := range items {
+		if p, ok := products[item.ProductID]; ok {
+			total += p.PriceCents * item.Quantity
+		}
+	}
+	return total
+}

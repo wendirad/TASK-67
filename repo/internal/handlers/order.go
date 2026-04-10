@@ -26,7 +26,8 @@ func (h *OrderHandler) Create(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
-	order, code, msg := h.orderService.CreateOrder(userID, &req)
+	cohort := middleware.GetCanaryCohort(c)
+	order, code, msg := h.orderService.CreateOrder(userID, &req, cohort)
 	if code != http.StatusCreated {
 		Error(c, code, msg)
 		return

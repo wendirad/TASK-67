@@ -8,16 +8,18 @@ import (
 )
 
 type PostService struct {
-	postRepo *repository.PostRepository
-	userRepo *repository.UserRepository
+	postRepo   *repository.PostRepository
+	userRepo   *repository.UserRepository
+	configRepo *repository.ConfigRepository
 }
 
-func NewPostService(postRepo *repository.PostRepository, userRepo *repository.UserRepository) *PostService {
-	return &PostService{postRepo: postRepo, userRepo: userRepo}
+func NewPostService(postRepo *repository.PostRepository, userRepo *repository.UserRepository, configRepo *repository.ConfigRepository) *PostService {
+	return &PostService{postRepo: postRepo, userRepo: userRepo, configRepo: configRepo}
 }
 
 // CreatePost creates a post with rate limiting and ban checks.
-func (s *PostService) CreatePost(userID, title, content string) (*models.Post, int, string) {
+// canaryCohort is the user's cohort from middleware context (-1 if unset).
+func (s *PostService) CreatePost(userID, title, content string, canaryCohort int) (*models.Post, int, string) {
 	// Check ban status
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
@@ -45,8 +47,8 @@ func (s *PostService) CreatePost(userID, title, content string) (*models.Post, i
 		return nil, 400, "Content must be at most 5000 characters"
 	}
 
-	// Check rate limit
-	rateLimit := s.postRepo.GetConfigInt("post.rate_limit_per_hour", 5)
+	// Check rate limit (canary-aware via cohort from middleware context)
+	rateLimit := s.configRepo.GetIntForCohort("post.rate_limit_per_hour", 5, canaryCohort)
 	recentCount, err := s.postRepo.CountRecentByUser(userID, 60)
 	if err != nil {
 		log.Printf("Error counting recent posts: %v", err)
@@ -79,7 +81,8 @@ func (s *PostService) ListPosts(userID, role string, page, pageSize int, status 
 }
 
 // ReportPost creates a report on a post.
-func (s *PostService) ReportPost(postID, userID, reason string) (*models.PostReport, int, string) {
+// canaryCohort is the reporter's cohort from middleware context (-1 if unset).
+func (s *PostService) ReportPost(postID, userID, reason string, canaryCohort int) (*models.PostReport, int, string) {
 	if reason == "" || len(reason) > 500 {
 		return nil, 400, "Reason is required (max 500 characters)"
 	}
@@ -105,7 +108,8 @@ func (s *PostService) ReportPost(postID, userID, reason string) (*models.PostRep
 		return nil, 409, "You have already reported this post"
 	}
 
-	autoFlagThreshold := s.postRepo.GetConfigInt("post.auto_flag_report_count", 3)
+	// Auto-flag threshold is canary-gated via cohort from middleware context
+	autoFlagThreshold := s.configRepo.GetIntForCohort("post.auto_flag_report_count", 3, canaryCohort)
 	report, err := s.postRepo.Report(postID, userID, reason, autoFlagThreshold)
 	if err != nil {
 		log.Printf("Error reporting post: %v", err)

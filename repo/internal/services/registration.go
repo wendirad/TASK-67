@@ -91,7 +91,7 @@ func (s *RegistrationService) ApproveRegistration(regID string) (*models.Registr
 	if reg == nil {
 		return nil, 404, "Registration not found"
 	}
-	if reg.Status != "pending" {
+	if !models.IsRegistrationApprovable(reg.Status) {
 		return nil, 422, fmt.Sprintf("Cannot approve registration in '%s' state", reg.Status)
 	}
 
@@ -143,7 +143,7 @@ func (s *RegistrationService) ConfirmRegistration(regID, userID string) (*models
 	if reg.UserID != userID {
 		return nil, 403, "Not your registration"
 	}
-	if reg.Status != "approved" {
+	if !models.IsRegistrationConfirmable(reg.Status) {
 		return nil, 422, fmt.Sprintf("Cannot confirm registration in '%s' state", reg.Status)
 	}
 
@@ -177,10 +177,7 @@ func (s *RegistrationService) CancelRegistration(regID, userID string, isAdmin b
 		return nil, 403, "Not your registration"
 	}
 
-	cancelableStatuses := map[string]bool{
-		"pending": true, "approved": true, "registered": true, "waitlisted": true,
-	}
-	if !cancelableStatuses[reg.Status] {
+	if !models.IsRegistrationCancelable(reg.Status) {
 		return nil, 422, fmt.Sprintf("Cannot cancel registration in '%s' state", reg.Status)
 	}
 
