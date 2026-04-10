@@ -115,6 +115,9 @@ func (s *ConfigService) ListAuditLogs(limit int) ([]models.AuditLog, error) {
 }
 
 // IsFeatureEnabled checks if a feature is enabled for a user's canary cohort.
+// userCohort must come from the middleware-populated context (via GetCanaryCohort).
+// A negative cohort (-1) means no cohort is assigned, so the user is excluded
+// from canary-gated features — consistent with IsFeatureEnabledForRequest.
 func IsFeatureEnabled(userCohort int, featureKey string, configRepo *repository.ConfigRepository) bool {
 	entry, err := configRepo.FindByKey(featureKey)
 	if err != nil || entry == nil {
@@ -123,24 +126,16 @@ func IsFeatureEnabled(userCohort int, featureKey string, configRepo *repository.
 	if entry.CanaryPercentage == nil {
 		return true
 	}
+	if userCohort < 0 {
+		return false // no cohort assigned = excluded from canary
+	}
 	return userCohort < *entry.CanaryPercentage
 }
 
-// ComputeCanaryCohort deterministically assigns a cohort (0-99) from a user ID.
-func ComputeCanaryCohort(userID string) int {
-	hash := 0
-	for _, c := range userID {
-		hash = (hash*31 + int(c)) % 100
-	}
-	if hash < 0 {
-		hash = -hash
-	}
-	return hash
-}
-
 // GetFeatureStatus returns the canary status for a feature for a specific user.
-func (s *ConfigService) GetFeatureStatus(userID, featureKey string) (bool, error) {
-	cohort := ComputeCanaryCohort(userID)
+// canaryCohort must come from the middleware-populated context (via GetCanaryCohort),
+// ensuring consistent cohort resolution across all code paths.
+func (s *ConfigService) GetFeatureStatus(canaryCohort int, featureKey string) (bool, error) {
 	entry, err := s.configRepo.FindByKey(featureKey)
 	if err != nil {
 		return false, fmt.Errorf("find feature config: %w", err)
@@ -148,5 +143,8 @@ func (s *ConfigService) GetFeatureStatus(userID, featureKey string) (bool, error
 	if entry == nil || entry.CanaryPercentage == nil {
 		return true, nil
 	}
-	return cohort < *entry.CanaryPercentage, nil
+	if canaryCohort < 0 {
+		return false, nil // no cohort assigned = excluded from canary
+	}
+	return canaryCohort < *entry.CanaryPercentage, nil
 }
