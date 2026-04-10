@@ -12,12 +12,29 @@ services:
       POSTGRES_DB: campusrec
       POSTGRES_USER: campusrec
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    entrypoint:
+      - sh
+      - -c
+      - |
+        chown postgres:postgres /wal_archive
+        # Allow replication connections for pg_basebackup (PITR support)
+        if [ -f /var/lib/postgresql/data/pg_hba.conf ]; then
+          grep -q "replication.*campusrec" /var/lib/postgresql/data/pg_hba.conf || echo "host replication campusrec all md5" >> /var/lib/postgresql/data/pg_hba.conf
+        fi
+        printf '#!/bin/sh\necho "host replication campusrec all md5" >> "$PGDATA/pg_hba.conf"\n' > /docker-entrypoint-initdb.d/allow-replication.sh
+        chmod +x /docker-entrypoint-initdb.d/allow-replication.sh
+        exec docker-entrypoint.sh postgres \
+          -c wal_level=replica \
+          -c archive_mode=on \
+          -c "archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f && chmod 644 /wal_archive/%f" \
+          -c max_wal_senders=3
     depends_on:
       init-secrets:
         condition: service_completed_successfully
     volumes:
       - pgdata:/var/lib/postgresql/data
       - secrets:/run/secrets:ro
+      - wal_archive:/wal_archive
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U campusrec -d campusrec"]
       interval: 5s
@@ -47,6 +64,7 @@ services:
     volumes:
       - backups:/backups
       - secrets:/run/secrets
+      - wal_archive:/wal_archive:ro
     command: ["server"]
 
   worker:
@@ -69,6 +87,7 @@ services:
     volumes:
       - backups:/backups
       - secrets:/run/secrets:ro
+      - wal_archive:/wal_archive:ro
     command: ["worker"]
 
   frontend:

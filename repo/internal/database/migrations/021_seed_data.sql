@@ -26,6 +26,7 @@ VALUES
     ('session.break_max_minutes', '10', 'Maximum duration per break in minutes'),
     ('session.noshow_minutes', '10', 'Minutes past session start before marking no-show'),
     ('session.reg_close_default_minutes', '120', 'Default registration close time before session start'),
+    ('session.occupancy_max_minutes', '180', 'Minutes of continuous occupancy before generating an exception ticket'),
     ('order.payment_timeout_minutes', '15', 'Payment deadline in minutes after order creation'),
     ('post.rate_limit_per_hour', '5', 'Maximum posts per hour per user'),
     ('post.auto_flag_report_count', '3', 'Number of reports to auto-flag a post'),

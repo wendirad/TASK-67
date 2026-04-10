@@ -2,19 +2,23 @@ package services
 
 import (
 	"log"
+	"strconv"
 	"time"
 
 	"campusrec/internal/models"
 	"campusrec/internal/repository"
 )
 
+const defaultRegCloseMinutes = 120
+
 type SessionService struct {
 	sessionRepo  *repository.SessionRepository
 	facilityRepo *repository.FacilityRepository
+	configRepo   *repository.ConfigRepository
 }
 
-func NewSessionService(sessionRepo *repository.SessionRepository, facilityRepo *repository.FacilityRepository) *SessionService {
-	return &SessionService{sessionRepo: sessionRepo, facilityRepo: facilityRepo}
+func NewSessionService(sessionRepo *repository.SessionRepository, facilityRepo *repository.FacilityRepository, configRepo *repository.ConfigRepository) *SessionService {
+	return &SessionService{sessionRepo: sessionRepo, facilityRepo: facilityRepo, configRepo: configRepo}
 }
 
 func (s *SessionService) ListSessions(page, pageSize int, status, facility, search, fromDate, toDate string) ([]models.Session, int, error) {
@@ -33,7 +37,7 @@ type CreateSessionInput struct {
 	StartTime                    time.Time `json:"start_time"`
 	EndTime                      time.Time `json:"end_time"`
 	TotalSeats                   int       `json:"total_seats"`
-	RegistrationCloseBeforeMin   int       `json:"registration_close_before_minutes"`
+	RegistrationCloseBeforeMin   *int      `json:"registration_close_before_minutes"`
 }
 
 func (s *SessionService) CreateSession(input CreateSessionInput, createdBy string) (*models.Session, int, string) {
@@ -46,6 +50,11 @@ func (s *SessionService) CreateSession(input CreateSessionInput, createdBy strin
 		return nil, 400, "Facility not found"
 	}
 
+	regCloseMin := s.resolveRegCloseDefault()
+	if input.RegistrationCloseBeforeMin != nil {
+		regCloseMin = *input.RegistrationCloseBeforeMin
+	}
+
 	session := &models.Session{
 		Title:                      input.Title,
 		Description:                input.Description,
@@ -54,7 +63,7 @@ func (s *SessionService) CreateSession(input CreateSessionInput, createdBy strin
 		StartTime:                  input.StartTime,
 		EndTime:                    input.EndTime,
 		TotalSeats:                 input.TotalSeats,
-		RegistrationCloseBeforeMin: input.RegistrationCloseBeforeMin,
+		RegistrationCloseBeforeMin: regCloseMin,
 		CreatedBy:                  createdBy,
 	}
 
@@ -195,4 +204,21 @@ func (s *SessionService) UpdateSessionStatus(id string, newStatus string) (*mode
 	session.Status = newStatus
 	log.Printf("Session %s status changed to %s", session.Title, newStatus)
 	return session, 200, ""
+}
+
+// resolveRegCloseDefault returns the configured default registration closure
+// minutes from config_entries, falling back to the hardcoded default.
+func (s *SessionService) resolveRegCloseDefault() int {
+	if s.configRepo == nil {
+		return defaultRegCloseMinutes
+	}
+	entry, err := s.configRepo.FindByKey("session.reg_close_default_minutes")
+	if err != nil || entry == nil {
+		return defaultRegCloseMinutes
+	}
+	v, err := strconv.Atoi(entry.Value)
+	if err != nil || v < 0 {
+		return defaultRegCloseMinutes
+	}
+	return v
 }

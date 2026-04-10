@@ -272,7 +272,7 @@ func importSession(ctx context.Context, tx *sql.Tx, fields map[string]string) (b
 	}
 
 	totalSeats, _ := strconv.Atoi(fields["total_seats"])
-	regCloseMin := 120
+	regCloseMin := lookupRegCloseDefault(ctx, tx)
 	if fields["registration_close_before_minutes"] != "" {
 		regCloseMin, _ = strconv.Atoi(fields["registration_close_before_minutes"])
 	}
@@ -451,4 +451,19 @@ func queryExport(ctx context.Context, db *sql.DB, query string) ([][]string, err
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+func lookupRegCloseDefault(ctx context.Context, tx *sql.Tx) int {
+	var val string
+	err := tx.QueryRowContext(ctx,
+		`SELECT value FROM config_entries WHERE key = 'session.reg_close_default_minutes'`,
+	).Scan(&val)
+	if err != nil {
+		return 120
+	}
+	v, err := strconv.Atoi(val)
+	if err != nil || v < 0 {
+		return 120
+	}
+	return v
 }

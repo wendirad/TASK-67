@@ -101,6 +101,13 @@ func main() {
 		Fn:       jobs.DailyBackup(db, cfg),
 	})
 
+	scheduler.AddJob(worker.ScheduledJob{
+		Name:     "occupancy_anomaly_detector",
+		LockID:   jobs.OccupancyAnomalyDetectorLockID,
+		Interval: 60 * time.Second,
+		Fn:       jobs.OccupancyAnomalyDetector(db),
+	})
+
 	log.Println("Worker started")
 
 	go func() {

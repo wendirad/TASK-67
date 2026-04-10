@@ -176,7 +176,7 @@ func (r *AddressRepository) IsAddressInUse(addressID string) (bool, error) {
 		SELECT EXISTS(
 			SELECT 1 FROM orders
 			WHERE shipping_address_id = $1
-			AND status NOT IN ('delivered', 'cancelled', 'refunded', 'closed')
+			AND status NOT IN ('delivered', 'closed', 'refunded', 'completed')
 		)
 	`, addressID).Scan(&inUse)
 	return inUse, err

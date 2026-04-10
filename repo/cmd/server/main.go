@@ -138,7 +138,7 @@ func runServe(cfg *config.Config) {
 	userService := services.NewUserService(userRepo)
 	addressService := services.NewAddressService(addressRepo)
 	facilityService := services.NewFacilityService(facilityRepo, cfg.JWTSecret)
-	sessionService := services.NewSessionService(sessionRepo, facilityRepo)
+	sessionService := services.NewSessionService(sessionRepo, facilityRepo, configRepo)
 	productService := services.NewProductService(productRepo)
 	catalogService := services.NewCatalogService(catalogRepo)
 	regService := services.NewRegistrationService(regRepo, sessionRepo, userRepo)
@@ -159,6 +159,7 @@ func runServe(cfg *config.Config) {
 		DBPassword:          cfg.DBPassword,
 		BackupPath:          cfg.BackupPath,
 		BackupEncryptionKey: cfg.BackupEncryptionKey,
+		WALArchivePath:      cfg.WALArchivePath,
 	})
 	paymentService := services.NewPaymentService(orderRepo, auditRepo, cfg.WeChatMerchantKey)
 
@@ -200,33 +201,52 @@ func runServe(cfg *config.Config) {
 	router.Use(middleware.CORS(cfg.AllowedOrigins))
 	router.Use(middleware.RateLimit())
 
-	// HTML page routes
+	// HTML page routes — public
 	router.GET("/", pageHandler.Index)
 	router.GET("/login", pageHandler.Login)
-	router.GET("/dashboard", pageHandler.Dashboard)
-	router.GET("/catalog", pageHandler.Catalog)
-	router.GET("/registrations", pageHandler.Registrations)
-	router.GET("/cart", pageHandler.Cart)
-	router.GET("/checkout", pageHandler.Checkout)
-	router.GET("/orders", pageHandler.Orders)
-	router.GET("/orders/:id", pageHandler.OrderDetail)
-	router.GET("/addresses", pageHandler.Addresses)
-	router.GET("/posts", pageHandler.Posts)
-	router.GET("/tickets", pageHandler.Tickets)
-	router.GET("/ticket/new", pageHandler.TicketNew)
-	router.GET("/ticket/:id", pageHandler.TicketDetail)
-	router.GET("/sessions/:id", pageHandler.SessionDetail)
-	router.GET("/products/:id", pageHandler.ProductDetail)
-	router.GET("/checkin/status", pageHandler.CheckinStatus)
-	router.GET("/staff/shipping", pageHandler.StaffShipping)
-	router.GET("/moderation", pageHandler.Moderation)
-	router.GET("/admin/users", pageHandler.AdminUsers)
-	router.GET("/admin/sessions", pageHandler.AdminSessions)
-	router.GET("/admin/kpi", pageHandler.AdminKPI)
-	router.GET("/admin/config", pageHandler.AdminConfig)
-	router.GET("/admin/import-export", pageHandler.AdminImportExport)
-	router.GET("/admin/backup", pageHandler.AdminBackup)
-	router.GET("/admin/tickets", pageHandler.AdminTickets)
+
+	// HTML page routes — authenticated member pages
+	pages := router.Group("/")
+	pages.Use(middleware.PageAuthRequired(cfg.JWTSecret))
+	pages.GET("/dashboard", pageHandler.Dashboard)
+	pages.GET("/catalog", pageHandler.Catalog)
+	pages.GET("/registrations", pageHandler.Registrations)
+	pages.GET("/cart", pageHandler.Cart)
+	pages.GET("/checkout", pageHandler.Checkout)
+	pages.GET("/orders", pageHandler.Orders)
+	pages.GET("/orders/:id", pageHandler.OrderDetail)
+	pages.GET("/addresses", pageHandler.Addresses)
+	pages.GET("/posts", pageHandler.Posts)
+	pages.GET("/tickets", pageHandler.Tickets)
+	pages.GET("/ticket/new", pageHandler.TicketNew)
+	pages.GET("/ticket/:id", pageHandler.TicketDetail)
+	pages.GET("/sessions/:id", pageHandler.SessionDetail)
+	pages.GET("/products/:id", pageHandler.ProductDetail)
+
+	// HTML page routes — staff pages
+	staffPages := router.Group("/")
+	staffPages.Use(middleware.PageAuthRequired(cfg.JWTSecret))
+	staffPages.Use(middleware.PageRequireRole("staff", "admin"))
+	staffPages.GET("/checkin/status", pageHandler.CheckinStatus)
+	staffPages.GET("/staff/shipping", pageHandler.StaffShipping)
+
+	// HTML page routes — moderator pages
+	modPages := router.Group("/")
+	modPages.Use(middleware.PageAuthRequired(cfg.JWTSecret))
+	modPages.Use(middleware.PageRequireRole("moderator", "admin"))
+	modPages.GET("/moderation", pageHandler.Moderation)
+
+	// HTML page routes — admin pages
+	adminPages := router.Group("/admin")
+	adminPages.Use(middleware.PageAuthRequired(cfg.JWTSecret))
+	adminPages.Use(middleware.PageRequireRole("admin"))
+	adminPages.GET("/users", pageHandler.AdminUsers)
+	adminPages.GET("/sessions", pageHandler.AdminSessions)
+	adminPages.GET("/kpi", pageHandler.AdminKPI)
+	adminPages.GET("/config", pageHandler.AdminConfig)
+	adminPages.GET("/import-export", pageHandler.AdminImportExport)
+	adminPages.GET("/backup", pageHandler.AdminBackup)
+	adminPages.GET("/tickets", pageHandler.AdminTickets)
 
 	// Public endpoints
 	router.GET("/api/health", healthHandler(db))

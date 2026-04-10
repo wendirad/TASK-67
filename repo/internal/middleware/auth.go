@@ -86,6 +86,64 @@ func extractToken(c *gin.Context) string {
 	return ""
 }
 
+// PageAuthRequired validates the JWT from the session_token cookie.
+// Unlike AuthRequired (which returns JSON 401), this redirects unauthenticated
+// users to /login so HTML page routes behave correctly in a browser.
+func PageAuthRequired(jwtSecret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenString := extractToken(c)
+		if tokenString == "" {
+			c.Redirect(http.StatusFound, "/login")
+			c.Abort()
+			return
+		}
+
+		claims := &JWTClaims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(jwtSecret), nil
+		})
+
+		if err != nil || !token.Valid {
+			c.Redirect(http.StatusFound, "/login")
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", claims.Sub)
+		c.Set("user_role", claims.Role)
+		c.Set("username", claims.Username)
+		c.Set("display_name", claims.DisplayName)
+		c.Next()
+	}
+}
+
+// PageRequireRole checks the user role set by PageAuthRequired and returns
+// a 403 HTML response if the role is not allowed. This must be used after
+// PageAuthRequired.
+func PageRequireRole(allowedRoles ...string) gin.HandlerFunc {
+	roleSet := make(map[string]bool, len(allowedRoles))
+	for _, r := range allowedRoles {
+		roleSet[r] = true
+	}
+
+	return func(c *gin.Context) {
+		role := GetUserRole(c)
+		if !roleSet[role] {
+			c.Data(http.StatusForbidden, "text/html; charset=utf-8",
+				[]byte(`<!doctype html><html><head><title>403 Forbidden</title></head>`+
+					`<body style="font-family:sans-serif;text-align:center;padding:4rem">`+
+					`<h1>403 Forbidden</h1><p>You do not have permission to access this page.</p>`+
+					`<a href="/dashboard">Back to Dashboard</a></body></html>`))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // GetUserID retrieves the authenticated user's ID from the context.
 func GetUserID(c *gin.Context) string {
 	id, _ := c.Get("user_id")

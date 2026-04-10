@@ -40,7 +40,7 @@ func TestOrderRefundableStatuses(t *testing.T) {
 		{"pending_payment", false},
 		{"closed", false},
 		{"refunded", false},
-		{"cancelled", false},
+		{"refund_pending", false},
 	}
 
 	for _, tt := range tests {

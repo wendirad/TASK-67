@@ -54,7 +54,7 @@ func (h *AdminSessionHandler) Create(c *gin.Context) {
 		Error(c, http.StatusBadRequest, "Total seats must be greater than 0")
 		return
 	}
-	if input.RegistrationCloseBeforeMin < 0 {
+	if input.RegistrationCloseBeforeMin != nil && *input.RegistrationCloseBeforeMin < 0 {
 		Error(c, http.StatusBadRequest, "Registration close before minutes must be >= 0")
 		return
 	}

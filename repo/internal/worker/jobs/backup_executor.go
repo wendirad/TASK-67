@@ -26,6 +26,7 @@ func BackupExecutor(db *sql.DB, cfg *config.Config) func(ctx context.Context) er
 			DBPassword:          cfg.DBPassword,
 			BackupPath:          cfg.BackupPath,
 			BackupEncryptionKey: cfg.BackupEncryptionKey,
+			WALArchivePath:      cfg.WALArchivePath,
 		})
 
 		pending, err := backupRepo.FindPendingBackups()
@@ -63,6 +64,7 @@ func DailyBackup(db *sql.DB, cfg *config.Config) func(ctx context.Context) error
 			DBPassword:          cfg.DBPassword,
 			BackupPath:          cfg.BackupPath,
 			BackupEncryptionKey: cfg.BackupEncryptionKey,
+			WALArchivePath:      cfg.WALArchivePath,
 		})
 
 		encrypted := cfg.BackupEncryptionKey != ""

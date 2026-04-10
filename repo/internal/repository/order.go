@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"strings"
 	"time"
 
 	"campusrec/internal/models"
@@ -54,15 +56,11 @@ func (r *OrderRepository) CreateOrder(
 		totalCents += p.PriceCents * item.Quantity
 	}
 
-	// Generate order number
-	orderNumber := generateOrderNumber()
-
 	// Set payment deadline (15 minutes)
 	paymentDeadline := time.Now().Add(15 * time.Minute)
 
 	// Create order
 	order := &models.Order{
-		OrderNumber:     orderNumber,
 		UserID:          userID,
 		Status:          "pending_payment",
 		TotalCents:      totalCents,
@@ -81,20 +79,31 @@ func (r *OrderRepository) CreateOrder(
 		order.ShipToPostalCode = &address.PostalCode
 	}
 
-	err = tx.QueryRow(`
-		INSERT INTO orders (id, order_number, user_id, status, total_cents,
-		    shipping_address_id, ship_to_recipient, ship_to_phone,
-		    ship_to_line1, ship_to_line2, ship_to_city, ship_to_province, ship_to_postal_code,
-		    payment_deadline)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		RETURNING id, created_at, updated_at
-	`, order.OrderNumber, order.UserID, order.Status, order.TotalCents,
-		order.ShippingAddressID, order.ShipToRecipient, order.ShipToPhone,
-		order.ShipToLine1, order.ShipToLine2, order.ShipToCity, order.ShipToProvince, order.ShipToPostalCode,
-		order.PaymentDeadline,
-	).Scan(&order.ID, &order.CreatedAt, &order.UpdatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("insert order: %w", err)
+	// Insert order with retry on the unlikely event of an order number collision
+	var insertErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		order.OrderNumber = generateOrderNumber()
+		insertErr = tx.QueryRow(`
+			INSERT INTO orders (id, order_number, user_id, status, total_cents,
+			    shipping_address_id, ship_to_recipient, ship_to_phone,
+			    ship_to_line1, ship_to_line2, ship_to_city, ship_to_province, ship_to_postal_code,
+			    payment_deadline)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			RETURNING id, created_at, updated_at
+		`, order.OrderNumber, order.UserID, order.Status, order.TotalCents,
+			order.ShippingAddressID, order.ShipToRecipient, order.ShipToPhone,
+			order.ShipToLine1, order.ShipToLine2, order.ShipToCity, order.ShipToProvince, order.ShipToPostalCode,
+			order.PaymentDeadline,
+		).Scan(&order.ID, &order.CreatedAt, &order.UpdatedAt)
+		if insertErr == nil {
+			break
+		}
+		if !strings.Contains(insertErr.Error(), "duplicate key") {
+			return nil, fmt.Errorf("insert order: %w", insertErr)
+		}
+	}
+	if insertErr != nil {
+		return nil, fmt.Errorf("insert order after retries: %w", insertErr)
 	}
 
 	// Create order items
@@ -120,17 +129,22 @@ func (r *OrderRepository) CreateOrder(
 		order.Items = append(order.Items, oi)
 	}
 
-	// Create payment record
+	// Create payment record with prepay data for QR code rendering
+	prepayData := fmt.Sprintf(
+		`{"appid":"wx_campusrec","mch_id":"campusrec_001","prepay_id":"PREPAY-%s","out_trade_no":"%s","total_fee":%d,"currency":"CNY","trade_type":"NATIVE"}`,
+		order.ID[:8], order.OrderNumber, totalCents,
+	)
 	payment := &models.Payment{
-		PaymentMethod: "wechat_pay",
-		AmountCents:   totalCents,
-		Status:        "pending",
+		PaymentMethod:    "wechat_pay",
+		AmountCents:      totalCents,
+		Status:           "pending",
+		WeChatPrepayData: &prepayData,
 	}
 	err = tx.QueryRow(`
-		INSERT INTO payments (id, order_id, payment_method, amount_cents, status)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4)
+		INSERT INTO payments (id, order_id, payment_method, amount_cents, status, wechat_prepay_data)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
 		RETURNING id, created_at, updated_at
-	`, order.ID, payment.PaymentMethod, payment.AmountCents, payment.Status,
+	`, order.ID, payment.PaymentMethod, payment.AmountCents, payment.Status, payment.WeChatPrepayData,
 	).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert payment: %w", err)
@@ -437,7 +451,7 @@ func (r *OrderRepository) RefundOrder(orderID string) error {
 	}
 
 	// Create refund payment record
-	refundID := fmt.Sprintf("RF-%s-%05d", time.Now().Format("20060102"), rand.Intn(100000))
+	refundID := generateRefundID()
 	_, err = tx.Exec(`
 		UPDATE payments SET status = 'refunded', refund_id = $1, refunded_at = NOW(), updated_at = NOW()
 		WHERE order_id = $2 AND status = 'confirmed'
@@ -609,5 +623,18 @@ func (r *OrderRepository) loadPayment(orderID string) (*models.Payment, error) {
 }
 
 func generateOrderNumber() string {
-	return fmt.Sprintf("ORD-%s-%05d", time.Now().Format("20060102"), rand.Intn(100000))
+	return fmt.Sprintf("ORD-%s-%s", time.Now().Format("20060102"), randomHex(6))
+}
+
+func generateRefundID() string {
+	return fmt.Sprintf("RF-%s-%s", time.Now().Format("20060102"), randomHex(6))
+}
+
+// randomHex returns n cryptographically random bytes encoded as uppercase hex.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	return strings.ToUpper(hex.EncodeToString(b))
 }

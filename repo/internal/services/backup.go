@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"campusrec/internal/models"
@@ -27,6 +28,7 @@ type BackupConfig struct {
 	DBPassword          string
 	BackupPath          string
 	BackupEncryptionKey string
+	WALArchivePath      string
 }
 
 type BackupService struct {
@@ -123,7 +125,13 @@ func (s *BackupService) TriggerRestore(restoreType, backupID, confirmationToken 
 
 	// Execute restore asynchronously
 	go func() {
-		if err := s.executeRestore(backup); err != nil {
+		var err error
+		if restoreType == "point_in_time" && targetTime != nil {
+			err = s.executePITR(backup, *targetTime)
+		} else {
+			err = s.executeRestore(backup)
+		}
+		if err != nil {
 			log.Printf("Restore failed for backup %s: %v", backup.ID, err)
 		} else {
 			log.Printf("Restore completed successfully from backup %s (%s)", backup.ID, backup.Filename)
@@ -219,6 +227,35 @@ func (s *BackupService) ExecuteBackup(backup *models.Backup) error {
 	}
 
 	log.Printf("Backup executed: id=%s file=%s size=%d wal_lsn=%s", backup.ID, finalFile, info.Size(), walLSN)
+
+	// Also take a physical base backup for PITR support
+	baseDir := filepath.Join(s.cfg.BackupPath, backup.Filename+"_base")
+	if err := os.MkdirAll(baseDir, 0700); err != nil {
+		log.Printf("Warning: could not create base backup dir: %v (PITR will not be available for this backup)", err)
+		return nil
+	}
+
+	bbArgs := []string{
+		"-h", s.cfg.DBHost,
+		"-p", fmt.Sprintf("%d", s.cfg.DBPort),
+		"-U", s.cfg.DBUser,
+		"-D", baseDir,
+		"-Ft",
+		"--checkpoint=fast",
+		"--wal-method=none",
+	}
+	bbCmd := exec.Command("pg_basebackup", bbArgs...)
+	bbCmd.Env = append(os.Environ(), "PGPASSWORD="+s.cfg.DBPassword)
+
+	bbOutput, bbErr := bbCmd.CombinedOutput()
+	if bbErr != nil {
+		log.Printf("Warning: pg_basebackup failed (PITR will not be available for this backup): %v (output: %s)",
+			bbErr, strings.TrimSpace(string(bbOutput)))
+		os.RemoveAll(baseDir)
+	} else {
+		log.Printf("Physical base backup completed: %s", baseDir)
+	}
+
 	return nil
 }
 
@@ -276,6 +313,162 @@ func (s *BackupService) executeRestore(backup *models.Backup) error {
 	}
 
 	log.Printf("Restore completed: backup=%s file=%s", backup.ID, restoreFile)
+	return nil
+}
+
+// executePITR performs a true point-in-time recovery by restoring a physical
+// base backup into a temporary PostgreSQL instance, replaying archived WAL
+// segments to the target timestamp, then dumping the recovered state and
+// applying it to the main database.
+func (s *BackupService) executePITR(backup *models.Backup, targetTime time.Time) error {
+	baseDir := filepath.Join(s.cfg.BackupPath, backup.Filename+"_base")
+	baseTar := filepath.Join(baseDir, "base.tar")
+	if _, err := os.Stat(baseTar); err != nil {
+		return fmt.Errorf("physical base backup not found at %s — only backups taken after PITR was enabled support point-in-time recovery", baseTar)
+	}
+
+	walArchive := s.cfg.WALArchivePath
+	if walArchive == "" {
+		walArchive = "/wal_archive"
+	}
+	if entries, _ := os.ReadDir(walArchive); len(entries) == 0 {
+		return fmt.Errorf("WAL archive at %s is empty — cannot replay to target time", walArchive)
+	}
+
+	// Create isolated temporary directory for recovery
+	tmpDir, err := os.MkdirTemp("", "pitr-")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	pgData := filepath.Join(tmpDir, "pgdata")
+	if err := os.MkdirAll(pgData, 0700); err != nil {
+		return fmt.Errorf("create pgdata dir: %w", err)
+	}
+
+	// Extract the physical base backup
+	log.Printf("PITR: extracting base backup to %s", pgData)
+	tarCmd := exec.Command("tar", "xf", baseTar, "-C", pgData)
+	if out, err := tarCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("extract base backup: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Write pg_hba.conf for passwordless local access in the temp instance
+	hbaContent := "local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n"
+	if err := os.WriteFile(filepath.Join(pgData, "pg_hba.conf"), []byte(hbaContent), 0600); err != nil {
+		return fmt.Errorf("write pg_hba.conf: %w", err)
+	}
+
+	// Append recovery configuration to postgresql.auto.conf
+	recoveryConf := fmt.Sprintf("\n# PITR recovery configuration\nrestore_command = 'cp %s/%%f %%p'\nrecovery_target_time = '%s'\nrecovery_target_action = 'promote'\n",
+		walArchive,
+		targetTime.UTC().Format("2006-01-02 15:04:05 UTC"),
+	)
+	confPath := filepath.Join(pgData, "postgresql.auto.conf")
+	f, err := os.OpenFile(confPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return fmt.Errorf("open postgresql.auto.conf: %w", err)
+	}
+	if _, err := f.WriteString(recoveryConf); err != nil {
+		f.Close()
+		return fmt.Errorf("write recovery config: %w", err)
+	}
+	f.Close()
+
+	// Create recovery.signal to tell PostgreSQL to enter recovery mode
+	if err := os.WriteFile(filepath.Join(pgData, "recovery.signal"), nil, 0600); err != nil {
+		return fmt.Errorf("create recovery.signal: %w", err)
+	}
+
+	// Fix ownership — PostgreSQL refuses to start as root
+	chownCmd := exec.Command("chown", "-R", "postgres:postgres", pgData)
+	if out, err := chownCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("chown pgdata: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Start temporary PostgreSQL on an alternate port
+	tmpPort := "5433"
+	log.Printf("PITR: starting temporary PostgreSQL on port %s with recovery_target_time=%s", tmpPort, targetTime.UTC().Format(time.RFC3339))
+	pgCmd := exec.Command("su-exec", "postgres",
+		"postgres",
+		"-D", pgData,
+		"-p", tmpPort,
+		"-c", "listen_addresses=127.0.0.1",
+		"-c", "unix_socket_directories="+tmpDir,
+		"-c", "log_min_messages=warning",
+		"-c", "archive_mode=off",
+	)
+	pgCmd.Stdout = os.Stdout
+	pgCmd.Stderr = os.Stderr
+
+	if err := pgCmd.Start(); err != nil {
+		return fmt.Errorf("start temp postgres: %w", err)
+	}
+	defer func() {
+		pgCmd.Process.Signal(syscall.SIGTERM)
+		pgCmd.Wait()
+	}()
+
+	// Wait for recovery to complete (recovery.signal is removed once done)
+	log.Printf("PITR: waiting for WAL replay to complete...")
+	ready := false
+	for i := 0; i < 180; i++ { // 3 minute timeout
+		time.Sleep(1 * time.Second)
+
+		checkCmd := exec.Command("pg_isready", "-h", "127.0.0.1", "-p", tmpPort)
+		if checkCmd.Run() != nil {
+			continue
+		}
+		// pg_isready succeeded — verify recovery.signal is gone (recovery complete)
+		if _, err := os.Stat(filepath.Join(pgData, "recovery.signal")); os.IsNotExist(err) {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		return fmt.Errorf("temporary PostgreSQL did not complete WAL recovery within 3 minutes")
+	}
+	log.Printf("PITR: WAL replay complete, dumping recovered state")
+
+	// Dump the recovered state from the temp instance
+	recoveredDump := filepath.Join(tmpDir, "recovered.dump")
+	dumpArgs := []string{
+		"-Fc",
+		"-h", "127.0.0.1",
+		"-p", tmpPort,
+		"-U", s.cfg.DBUser,
+		"-d", s.cfg.DBName,
+		"-f", recoveredDump,
+	}
+	dumpCmd := exec.Command("pg_dump", dumpArgs...)
+	if out, err := dumpCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("dump recovered state: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Apply the recovered dump to the main database
+	log.Printf("PITR: applying recovered state to main database")
+	restoreArgs := []string{
+		"-h", s.cfg.DBHost,
+		"-p", fmt.Sprintf("%d", s.cfg.DBPort),
+		"-U", s.cfg.DBUser,
+		"-d", s.cfg.DBName,
+		"--clean",
+		"--if-exists",
+		recoveredDump,
+	}
+	restoreCmd := exec.Command("pg_restore", restoreArgs...)
+	restoreCmd.Env = append(os.Environ(), "PGPASSWORD="+s.cfg.DBPassword)
+
+	if out, err := restoreCmd.CombinedOutput(); err != nil {
+		outStr := strings.TrimSpace(string(out))
+		if strings.Contains(outStr, "ERROR") {
+			return fmt.Errorf("apply recovered state: %w (%s)", err, outStr)
+		}
+		log.Printf("PITR restore completed with warnings: %s", outStr)
+	}
+
+	log.Printf("PITR completed successfully: target=%s base_backup=%s", targetTime.Format(time.RFC3339), backup.Filename)
 	return nil
 }
 

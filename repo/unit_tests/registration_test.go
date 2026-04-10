@@ -21,7 +21,7 @@ func TestRegistrationCancelableStatuses(t *testing.T) {
 		{"approved", true},
 		{"registered", true},
 		{"waitlisted", true},
-		{"cancelled", false},
+		{"canceled", false},
 		{"rejected", false},
 		{"no_show", false},
 		{"completed", false},
@@ -40,7 +40,7 @@ func TestRegistrationConfirmOnlyFromApproved(t *testing.T) {
 		"approved": true,
 	}
 
-	nonConfirmable := []string{"pending", "registered", "waitlisted", "cancelled", "rejected"}
+	nonConfirmable := []string{"pending", "registered", "waitlisted", "canceled", "rejected"}
 	for _, status := range nonConfirmable {
 		if confirmable[status] {
 			t.Errorf("Status %q should not be confirmable", status)
@@ -57,7 +57,7 @@ func TestRegistrationApproveOnlyFromPending(t *testing.T) {
 		"pending": true,
 	}
 
-	nonApprovable := []string{"approved", "registered", "cancelled", "rejected"}
+	nonApprovable := []string{"approved", "registered", "canceled", "rejected"}
 	for _, status := range nonApprovable {
 		if approvable[status] {
 			t.Errorf("Status %q should not be approvable", status)

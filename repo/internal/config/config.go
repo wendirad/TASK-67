@@ -24,6 +24,7 @@ type Config struct {
 
 	WeChatMerchantKey   string
 	BackupEncryptionKey string
+	WALArchivePath      string
 
 	AllowedOrigins []string
 }
@@ -54,6 +55,7 @@ func Load() (*Config, error) {
 
 		WeChatMerchantKey:   os.Getenv("WECHAT_MERCHANT_KEY"),
 		BackupEncryptionKey: os.Getenv("BACKUP_ENCRYPTION_KEY"),
+		WALArchivePath:      getEnv("WAL_ARCHIVE_PATH", "/wal_archive"),
 
 		AllowedOrigins: parseOrigins(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
 	}

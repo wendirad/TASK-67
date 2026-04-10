@@ -9,12 +9,70 @@ templ OrderDetailPage() {
 			</div>
 		</div>
 		<script>
+		let countdownInterval = null;
+
 		async function loadOrder() {
 			const id = window.location.pathname.split('/').pop();
 			const res = await api(`/api/orders/${id}`);
 			if (!res) return;
 			const o = res.data;
-			document.getElementById('order-detail').innerHTML = `
+			const el = document.getElementById('order-detail');
+
+			let paymentSection = '';
+			if (o.status === 'pending_payment' && o.payment) {
+				const deadlineISO = o.payment_deadline;
+				paymentSection = `
+					<div class="bg-white rounded-lg shadow p-6 mb-6">
+						<h3 class="text-lg font-semibold mb-4">Complete Payment</h3>
+						<div class="flex flex-col lg:flex-row gap-6">
+							<div class="flex flex-col items-center">
+								<div class="bg-white p-3 border-2 border-gray-200 rounded-lg">
+									<canvas id="payment-qr" width="200" height="200"></canvas>
+								</div>
+								<p class="text-xs text-gray-500 mt-2">Scan with WeChat to pay</p>
+							</div>
+							<div class="flex-1 space-y-3">
+								<div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+									<div class="flex items-center mb-2">
+										<svg class="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+										<span class="text-sm font-medium text-yellow-800">Payment deadline</span>
+									</div>
+									<p class="text-2xl font-bold text-yellow-900" id="countdown-display">--:--</p>
+									<p class="text-xs text-yellow-700 mt-1">Time remaining to complete payment</p>
+								</div>
+								<div class="text-sm text-gray-600 space-y-1">
+									<p><strong>Amount:</strong> ${formatCents(o.total_cents)}</p>
+									<p><strong>Method:</strong> WeChat Pay</p>
+									<p><strong>Order:</strong> ${o.order_number}</p>
+								</div>
+								<div class="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500 space-y-1">
+									<p>1. Open WeChat and go to <strong>Scan</strong></p>
+									<p>2. Scan the QR code on the left</p>
+									<p>3. Confirm the payment amount and complete the transaction</p>
+									<p>4. This page will update automatically once payment is received</p>
+								</div>
+							</div>
+						</div>
+						<div id="timeout-banner" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+							<div class="flex items-start">
+								<svg class="w-5 h-5 text-red-600 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+								<div>
+									<p class="text-sm font-medium text-red-800">Payment time has expired</p>
+									<p class="text-xs text-red-700 mt-1">This order will be automatically cancelled. Reserved stock has been released. You can place a new order from the catalog if the items are still available.</p>
+								</div>
+							</div>
+						</div>
+					</div>`;
+			} else if (o.payment) {
+				paymentSection = `
+					<div class="mt-4 p-3 bg-gray-50 rounded">
+						<p class="text-sm"><strong>Payment:</strong> ${o.payment.payment_method} - ${statusBadge(o.payment.status)}</p>
+						${o.payment.transaction_id ? '<p class="text-xs text-gray-500 mt-1">Transaction: ' + o.payment.transaction_id + '</p>' : ''}
+					</div>`;
+			}
+
+			el.innerHTML = `
+				${paymentSection}
 				<div class="bg-white rounded-lg shadow p-6">
 					<div class="flex justify-between items-start mb-6">
 						<div>
@@ -41,17 +99,79 @@ templ OrderDetailPage() {
 					</table>` : ''}
 					<div class="border-t pt-4 flex justify-between items-center">
 						<span class="text-lg font-bold">Total: ${formatCents(o.total_cents)}</span>
-						${o.status === 'pending_payment' ? `<button onclick="cancelOrder('${o.id}')" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Cancel Order</button>` : ''}
+						${o.status === 'pending_payment' ? '<button onclick="cancelOrder(\'' + o.id + '\')" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Cancel Order</button>' : ''}
 					</div>
-					${o.payment ? `<div class="mt-4 p-3 bg-gray-50 rounded"><p class="text-sm"><strong>Payment:</strong> ${o.payment.payment_method} - ${statusBadge(o.payment.status)}</p></div>` : ''}
-					${o.ship_to_line1 ? `<div class="mt-4 p-3 bg-gray-50 rounded"><p class="text-sm font-medium">Shipping Address</p><p class="text-sm text-gray-600">${o.ship_to_recipient || ''}<br>${o.ship_to_line1}${o.ship_to_line2 ? ', '+o.ship_to_line2 : ''}<br>${o.ship_to_city || ''} ${o.ship_to_province || ''} ${o.ship_to_postal_code || ''}</p></div>` : ''}
+					${o.status !== 'pending_payment' && o.payment ? paymentSection : ''}
+					${o.ship_to_line1 ? '<div class="mt-4 p-3 bg-gray-50 rounded"><p class="text-sm font-medium">Shipping Address</p><p class="text-sm text-gray-600">' + (o.ship_to_recipient || '') + '<br>' + o.ship_to_line1 + (o.ship_to_line2 ? ', '+o.ship_to_line2 : '') + '<br>' + (o.ship_to_city || '') + ' ' + (o.ship_to_province || '') + ' ' + (o.ship_to_postal_code || '') + '</p></div>' : ''}
 				</div>`;
+
+			// Render QR code and start countdown if pending payment
+			if (o.status === 'pending_payment' && o.payment?.wechat_prepay_data) {
+				renderPaymentQR(o.payment.wechat_prepay_data);
+				startCountdown(o.payment_deadline, o.id);
+			}
 		}
+
+		function renderPaymentQR(prepayData) {
+			const canvas = document.getElementById('payment-qr');
+			if (!canvas || typeof QRious === 'undefined') return;
+			new QRious({
+				element: canvas,
+				value: prepayData,
+				size: 200,
+				level: 'M',
+				foreground: '#000000',
+				background: '#ffffff'
+			});
+		}
+
+		function startCountdown(deadlineISO, orderId) {
+			if (countdownInterval) clearInterval(countdownInterval);
+			const deadline = new Date(deadlineISO).getTime();
+			const display = document.getElementById('countdown-display');
+			const banner = document.getElementById('timeout-banner');
+			const qrCanvas = document.getElementById('payment-qr');
+
+			function tick() {
+				const now = Date.now();
+				const remaining = deadline - now;
+
+				if (remaining <= 0) {
+					clearInterval(countdownInterval);
+					if (display) display.textContent = '00:00';
+					if (banner) banner.classList.remove('hidden');
+					if (qrCanvas) qrCanvas.style.opacity = '0.3';
+					// Reload order after a short delay to pick up the closed status
+					setTimeout(() => loadOrder(), 5000);
+					return;
+				}
+
+				const minutes = Math.floor(remaining / 60000);
+				const seconds = Math.floor((remaining % 60000) / 1000);
+				if (display) {
+					display.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+					// Visual urgency when under 2 minutes
+					if (remaining < 120000) {
+						display.classList.add('text-red-600');
+						display.classList.remove('text-yellow-900');
+					}
+				}
+			}
+
+			tick();
+			countdownInterval = setInterval(tick, 1000);
+		}
+
 		async function cancelOrder(id) {
-			if (!confirm('Cancel this order?')) return;
+			if (!confirm('Cancel this order? Reserved stock will be released.')) return;
 			const res = await api(`/api/orders/${id}/cancel`, { method: 'PUT' });
-			if (res) { showAlert('success', 'Order cancelled'); loadOrder(); }
+			if (res) {
+				if (countdownInterval) clearInterval(countdownInterval);
+				showAlert('success', 'Order cancelled');
+				loadOrder();
+			}
 		}
+
 		loadOrder();
 		</script>
 	}
