@@ -21,7 +21,7 @@ services:
         if [ -f /var/lib/postgresql/data/pg_hba.conf ]; then
           grep -q "replication.*campusrec" /var/lib/postgresql/data/pg_hba.conf || echo "host replication campusrec all md5" >> /var/lib/postgresql/data/pg_hba.conf
         fi
-        printf '#!/bin/sh\necho "host replication campusrec all md5" >> "$PGDATA/pg_hba.conf"\n' > /docker-entrypoint-initdb.d/allow-replication.sh
+        printf '#!/bin/sh\necho "host replication campusrec all md5" >> /var/lib/postgresql/data/pg_hba.conf\n' > /docker-entrypoint-initdb.d/allow-replication.sh
         chmod +x /docker-entrypoint-initdb.d/allow-replication.sh
         exec docker-entrypoint.sh postgres \
           -c wal_level=replica \
