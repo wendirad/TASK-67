@@ -55,25 +55,30 @@ func TestPaginatedResponseEmptyResult(t *testing.T) {
 	}
 }
 
-func TestPaginationParamsOffset(t *testing.T) {
+// TestPaginatedResponseTotalPagesEdgeCases verifies total_pages calculation
+// using the real PaginatedResponse function for boundary conditions.
+func TestPaginatedResponseTotalPagesEdgeCases(t *testing.T) {
 	tests := []struct {
-		page     int
-		pageSize int
-		offset   int
+		name       string
+		total      int
+		pageSize   int
+		wantPages  int
 	}{
-		{1, 20, 0},
-		{2, 20, 20},
-		{3, 10, 20},
-		{5, 50, 200},
+		{"zero items", 0, 20, 0},
+		{"one item", 1, 20, 1},
+		{"exactly one page", 20, 20, 1},
+		{"one over page boundary", 21, 20, 2},
+		{"large dataset", 1000, 50, 20},
+		{"page size 1", 5, 1, 5},
 	}
+
 	for _, tt := range tests {
-		p := handlers.PaginationParams{
-			Page:     tt.page,
-			PageSize: tt.pageSize,
-			Offset:   (tt.page - 1) * tt.pageSize,
-		}
-		if p.Offset != tt.offset {
-			t.Errorf("Page=%d, PageSize=%d: Offset = %d, want %d", tt.page, tt.pageSize, p.Offset, tt.offset)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			p := handlers.PaginationParams{Page: 1, PageSize: tt.pageSize, Offset: 0}
+			result := handlers.PaginatedResponse(nil, tt.total, p)
+			if result["total_pages"] != tt.wantPages {
+				t.Errorf("total_pages = %v, want %d", result["total_pages"], tt.wantPages)
+			}
+		})
 	}
 }

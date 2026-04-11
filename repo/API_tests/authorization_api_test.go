@@ -650,3 +650,534 @@ func TestOrderWithOtherUsersAddress(t *testing.T) {
 		t.Errorf("Expected 403 or 404 using another's address, got %d %s", resp.Code, resp.Msg)
 	}
 }
+
+// ===========================================================================
+// CART AUTHORIZATION TESTS
+// ===========================================================================
+
+// addCartItem adds a product to the member's cart and returns the cart item ID.
+func addCartItem(t *testing.T, mc *memberClient) string {
+	t.Helper()
+	resp := mc.get("/api/products?page_size=10")
+	if resp.Code != 200 {
+		t.Fatalf("List products failed: %d", resp.Code)
+	}
+	var prodData struct {
+		Items []struct {
+			ID            string `json:"id"`
+			StockQuantity int    `json:"stock_quantity"`
+			Status        string `json:"status"`
+		} `json:"items"`
+	}
+	json.Unmarshal(resp.Data, &prodData)
+
+	for _, p := range prodData.Items {
+		if p.Status == "active" && p.StockQuantity > 0 {
+			resp = mc.post("/api/cart", map[string]interface{}{
+				"product_id": p.ID,
+				"quantity":   1,
+			})
+			if resp.Code == 201 {
+				// Get cart to find the item ID
+				cartResp := mc.get("/api/cart")
+				if cartResp.Code != 200 {
+					t.Fatalf("Get cart failed: %d", cartResp.Code)
+				}
+				var items []struct {
+					ID string `json:"id"`
+				}
+				json.Unmarshal(cartResp.Data, &items)
+				if len(items) > 0 {
+					return items[len(items)-1].ID
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// TestCartUpdateCrossUser verifies member B cannot update member A's cart item.
+func TestCartUpdateCrossUser(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "cart_upd_a")
+	memberB := createMember(t, admin, "cart_upd_b")
+
+	itemID := addCartItem(t, memberA)
+	if itemID == "" {
+		t.Skip("No product available to add to cart")
+	}
+
+	// Owner can update
+	resp := memberA.put("/api/cart/"+itemID, map[string]interface{}{
+		"quantity": 2,
+	})
+	if resp.Code != 200 {
+		t.Errorf("Owner should update own cart item: got %d %s", resp.Code, resp.Msg)
+	}
+
+	// Another member should get 403
+	resp = memberB.put("/api/cart/"+itemID, map[string]interface{}{
+		"quantity": 5,
+	})
+	if resp.Code != 403 {
+		t.Errorf("Non-owner should get 403 updating another's cart item, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestCartDeleteCrossUser verifies member B cannot delete member A's cart item.
+func TestCartDeleteCrossUser(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "cart_del_a")
+	memberB := createMember(t, admin, "cart_del_b")
+
+	itemID := addCartItem(t, memberA)
+	if itemID == "" {
+		t.Skip("No product available to add to cart")
+	}
+
+	// Another member should get 403
+	resp := memberB.delete("/api/cart/" + itemID)
+	if resp.Code != 403 {
+		t.Errorf("Non-owner should get 403 deleting another's cart item, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// Owner can delete
+	resp = memberA.delete("/api/cart/" + itemID)
+	if resp.Code != 200 {
+		t.Errorf("Owner should delete own cart item: got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestCartListIsolation verifies members only see their own cart items.
+func TestCartListIsolation(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "cart_iso_a")
+	memberB := createMember(t, admin, "cart_iso_b")
+
+	itemID := addCartItem(t, memberA)
+	if itemID == "" {
+		t.Skip("No product available to add to cart")
+	}
+
+	// Member B's cart should not contain member A's items
+	resp := memberB.get("/api/cart")
+	if resp.Code != 200 {
+		t.Fatalf("Get cart failed: %d", resp.Code)
+	}
+	var items []struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(resp.Data, &items)
+
+	for _, item := range items {
+		if item.ID == itemID {
+			t.Error("Member B's cart should not contain member A's cart item")
+		}
+	}
+}
+
+// ===========================================================================
+// REGISTRATION AUTHORIZATION TESTS
+// ===========================================================================
+
+// TestRegistrationConfirmCrossUser verifies member B cannot confirm member A's registration.
+func TestRegistrationConfirmCrossUser(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "reg_cfm_a")
+	memberB := createMember(t, admin, "reg_cfm_b")
+
+	// Get a session
+	resp := memberA.get("/api/sessions?page_size=10")
+	if resp.Code != 200 {
+		t.Fatalf("List sessions failed: %d", resp.Code)
+	}
+	var sessData struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	json.Unmarshal(resp.Data, &sessData)
+
+	var regID string
+	for _, s := range sessData.Items {
+		if s.Status == "open" || s.Status == "published" {
+			resp = memberA.post("/api/registrations", map[string]interface{}{
+				"session_id": s.ID,
+			})
+			if resp.Code == 201 {
+				var reg struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+				}
+				json.Unmarshal(resp.Data, &reg)
+				// Approve it so it can be confirmed
+				admin.put("/api/admin/registrations/"+reg.ID+"/approve", nil)
+				regID = reg.ID
+				break
+			}
+		}
+	}
+	if regID == "" {
+		t.Skip("No session available to create a registration")
+	}
+
+	// Member B should get 403 trying to confirm member A's registration
+	resp = memberB.put("/api/registrations/"+regID+"/confirm", nil)
+	if resp.Code != 403 {
+		t.Errorf("Non-owner should get 403 confirming another's registration, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// Owner can confirm
+	resp = memberA.put("/api/registrations/"+regID+"/confirm", nil)
+	if resp.Code != 200 {
+		t.Errorf("Owner should confirm own registration: got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestRegistrationCancelCrossUser verifies member B cannot cancel member A's registration.
+func TestRegistrationCancelCrossUser(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "reg_cnl_a")
+	memberB := createMember(t, admin, "reg_cnl_b")
+
+	// Get a session and create a registration
+	resp := memberA.get("/api/sessions?page_size=10")
+	if resp.Code != 200 {
+		t.Fatalf("List sessions failed: %d", resp.Code)
+	}
+	var sessData struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	json.Unmarshal(resp.Data, &sessData)
+
+	var regID string
+	for _, s := range sessData.Items {
+		if s.Status == "open" || s.Status == "published" {
+			resp = memberA.post("/api/registrations", map[string]interface{}{
+				"session_id": s.ID,
+			})
+			if resp.Code == 201 {
+				var reg struct {
+					ID string `json:"id"`
+				}
+				json.Unmarshal(resp.Data, &reg)
+				regID = reg.ID
+				break
+			}
+		}
+	}
+	if regID == "" {
+		t.Skip("No session available to create a registration")
+	}
+
+	// Member B should get 403 trying to cancel member A's registration
+	resp = memberB.put("/api/registrations/"+regID+"/cancel", nil)
+	if resp.Code != 403 {
+		t.Errorf("Non-owner should get 403 canceling another's registration, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// Admin can cancel any registration
+	resp = admin.put("/api/registrations/"+regID+"/cancel", nil)
+	if resp.Code != 200 {
+		t.Errorf("Admin should cancel any registration: got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// ===========================================================================
+// POST AUTHORIZATION TESTS
+// ===========================================================================
+
+// TestPostSelfReportPrevention verifies a user cannot report their own post.
+func TestPostSelfReportPrevention(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "post_self")
+
+	// Create a post
+	resp := member.post("/api/posts", map[string]interface{}{
+		"title":   "Self report test",
+		"content": "Testing that users cannot report their own posts.",
+	})
+	if resp.Code != 201 {
+		t.Fatalf("Create post failed: %d %s", resp.Code, resp.Msg)
+	}
+	var post struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(resp.Data, &post)
+
+	// Try to report own post — should get 400
+	resp = member.post("/api/posts/"+post.ID+"/report", map[string]interface{}{
+		"reason": "Testing self-report prevention",
+	})
+	if resp.Code != 400 {
+		t.Errorf("Self-reporting should return 400, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestPostReportCrossUser verifies a different user CAN report another's post.
+func TestPostReportCrossUser(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "post_rpt_a")
+	memberB := createMember(t, admin, "post_rpt_b")
+
+	// Member A creates a post
+	resp := memberA.post("/api/posts", map[string]interface{}{
+		"title":   "Reportable post",
+		"content": "This post can be reported by other users.",
+	})
+	if resp.Code != 201 {
+		t.Fatalf("Create post failed: %d %s", resp.Code, resp.Msg)
+	}
+	var post struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(resp.Data, &post)
+
+	// Member B can report member A's post
+	resp = memberB.post("/api/posts/"+post.ID+"/report", map[string]interface{}{
+		"reason": "Testing cross-user reporting works",
+	})
+	if resp.Code != 201 {
+		t.Errorf("Cross-user report should return 201, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestPostDuplicateReport verifies a user cannot report the same post twice.
+func TestPostDuplicateReport(t *testing.T) {
+	admin := getAdminClient(t)
+	memberA := createMember(t, admin, "post_dup_a")
+	memberB := createMember(t, admin, "post_dup_b")
+
+	resp := memberA.post("/api/posts", map[string]interface{}{
+		"title":   "Duplicate report test",
+		"content": "This post tests duplicate report prevention.",
+	})
+	if resp.Code != 201 {
+		t.Fatalf("Create post failed: %d %s", resp.Code, resp.Msg)
+	}
+	var post struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(resp.Data, &post)
+
+	// First report succeeds
+	resp = memberB.post("/api/posts/"+post.ID+"/report", map[string]interface{}{
+		"reason": "First report - should succeed",
+	})
+	if resp.Code != 201 {
+		t.Fatalf("First report should succeed: got %d %s", resp.Code, resp.Msg)
+	}
+
+	// Second report should be rejected (409 Conflict)
+	resp = memberB.post("/api/posts/"+post.ID+"/report", map[string]interface{}{
+		"reason": "Duplicate report - should fail",
+	})
+	if resp.Code != 409 {
+		t.Errorf("Duplicate report should return 409, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// ===========================================================================
+// ADDITIONAL ADMIN ENDPOINT AUTHORIZATION TESTS
+// ===========================================================================
+
+// TestAdminFacilitiesRequireAdmin verifies members cannot access facility endpoints.
+func TestAdminFacilitiesRequireAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "fac_m")
+
+	// GET facilities
+	resp := member.get("/api/admin/facilities")
+	if resp.Code != 403 {
+		t.Errorf("GET /api/admin/facilities: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// POST facility
+	resp = member.post("/api/admin/facilities", map[string]interface{}{
+		"name":     "Hacked Facility",
+		"location": "Evil Lair",
+	})
+	if resp.Code != 403 {
+		t.Errorf("POST /api/admin/facilities: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestAdminSessionsRequireAdmin verifies members cannot access admin session endpoints.
+func TestAdminSessionsRequireAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "sess_m")
+
+	// POST session
+	resp := member.post("/api/admin/sessions", map[string]interface{}{
+		"name":        "Hacked Session",
+		"facility_id": "00000000-0000-0000-0000-000000000000",
+	})
+	if resp.Code != 403 {
+		t.Errorf("POST /api/admin/sessions: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// PUT session
+	resp = member.put("/api/admin/sessions/00000000-0000-0000-0000-000000000000", map[string]interface{}{
+		"name": "Hacked",
+	})
+	if resp.Code != 403 {
+		t.Errorf("PUT /api/admin/sessions/:id: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	// PUT session status
+	resp = member.put("/api/admin/sessions/00000000-0000-0000-0000-000000000000/status", map[string]interface{}{
+		"status": "open",
+	})
+	if resp.Code != 403 {
+		t.Errorf("PUT /api/admin/sessions/:id/status: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestAdminRegistrationsRequireAdmin verifies members cannot access admin registration endpoints.
+func TestAdminRegistrationsRequireAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "areg_m")
+
+	resp := member.get("/api/admin/registrations")
+	if resp.Code != 403 {
+		t.Errorf("GET /api/admin/registrations: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	resp = member.put("/api/admin/registrations/00000000-0000-0000-0000-000000000000/approve", nil)
+	if resp.Code != 403 {
+		t.Errorf("PUT approve: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	resp = member.put("/api/admin/registrations/00000000-0000-0000-0000-000000000000/reject", map[string]interface{}{
+		"reason": "Test rejection",
+	})
+	if resp.Code != 403 {
+		t.Errorf("PUT reject: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestBackupEndpointsRequireAdmin verifies members cannot access backup endpoints.
+func TestBackupEndpointsRequireAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "backup_m")
+
+	endpoints := []struct {
+		method string
+		path   string
+	}{
+		{"POST", "/api/admin/backup"},
+		{"GET", "/api/admin/backups"},
+		{"GET", "/api/admin/backup/restore-targets"},
+		{"POST", "/api/admin/backup/restore"},
+		{"POST", "/api/admin/archive/run"},
+		{"GET", "/api/admin/archive/status"},
+	}
+
+	for _, ep := range endpoints {
+		resp := member.request(ep.method, ep.path, nil)
+		if resp.Code != 403 {
+			t.Errorf("%s %s: member should get 403, got %d %s", ep.method, ep.path, resp.Code, resp.Msg)
+		}
+	}
+}
+
+// TestKPIEndpointsRequireAdmin verifies members cannot access KPI endpoints.
+func TestKPIEndpointsRequireAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "kpi_m")
+
+	endpoints := []string{
+		"/api/kpi/overview",
+		"/api/kpi/fill-rate",
+		"/api/kpi/members",
+		"/api/kpi/engagement",
+		"/api/kpi/coaches",
+		"/api/kpi/revenue",
+		"/api/kpi/tickets",
+	}
+
+	for _, path := range endpoints {
+		resp := member.get(path)
+		if resp.Code != 403 {
+			t.Errorf("GET %s: member should get 403, got %d %s", path, resp.Code, resp.Msg)
+		}
+	}
+}
+
+// TestConfigUpdateRequiresAdmin verifies members cannot update config entries.
+func TestConfigUpdateRequiresAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "cfg_m")
+
+	resp := member.put("/api/admin/config/post.rate_limit_per_hour", map[string]interface{}{
+		"value": "100",
+	})
+	if resp.Code != 403 {
+		t.Errorf("PUT config: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestPaymentSimulateRequiresStaff verifies members cannot simulate payment callbacks.
+func TestPaymentSimulateRequiresStaff(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "pay_sim_m")
+
+	resp := member.post("/api/payments/00000000-0000-0000-0000-000000000000/simulate-callback", map[string]interface{}{
+		"status": "paid",
+	})
+	if resp.Code != 403 {
+		t.Errorf("Simulate callback: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestImportExportRequiresStaffOrAdmin verifies members cannot access import/export.
+func TestImportExportRequiresStaffOrAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "ie_m")
+
+	resp := member.get("/api/export")
+	if resp.Code != 403 {
+		t.Errorf("GET /api/export: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	resp = member.post("/api/import", map[string]interface{}{
+		"type": "products",
+	})
+	if resp.Code != 403 {
+		t.Errorf("POST /api/import: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestModerationEndpointsRequireRole verifies members cannot access moderation endpoints.
+func TestModerationEndpointsRequireModeratorOrAdmin(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "mod_m")
+
+	resp := member.get("/api/moderation/posts")
+	if resp.Code != 403 {
+		t.Errorf("GET moderation queue: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+
+	resp = member.post("/api/moderation/posts/00000000-0000-0000-0000-000000000000/decision", map[string]interface{}{
+		"action": "approve",
+		"reason": "This is a test moderation decision attempt",
+	})
+	if resp.Code != 403 {
+		t.Errorf("POST moderation decision: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}
+
+// TestCheckinQRRequiresStaff verifies members cannot generate QR codes.
+func TestCheckinQRRequiresStaff(t *testing.T) {
+	admin := getAdminClient(t)
+	member := createMember(t, admin, "qr_m")
+
+	resp := member.get("/api/sessions/00000000-0000-0000-0000-000000000000/qr")
+	if resp.Code != 403 {
+		t.Errorf("GET session QR: member should get 403, got %d %s", resp.Code, resp.Msg)
+	}
+}

@@ -2,136 +2,138 @@ package unit_tests
 
 import (
 	"testing"
+
+	"campusrec/internal/models"
 )
 
-// TestBuyNowSourceValidation verifies the order source field validation logic.
-func TestBuyNowSourceValidation(t *testing.T) {
-	validSources := map[string]bool{
-		"cart":    true,
-		"buy_now": true,
+// TestBuyNowOrderTotalCents verifies the real OrderTotalCents computation
+// used when creating orders (both buy_now and cart source).
+func TestBuyNowOrderTotalCents(t *testing.T) {
+	products := map[string]*models.Product{
+		"prod-1": {ID: "prod-1", PriceCents: 1000},
+		"prod-2": {ID: "prod-2", PriceCents: 2500},
 	}
 
 	tests := []struct {
-		source string
-		valid  bool
+		name  string
+		items []models.CreateOrderItem
+		want  int
 	}{
-		{"cart", true},
-		{"buy_now", true},
-		{"", false},
-		{"direct", false},
-		{"buy", false},
-		{"CART", false},
-		{"BUY_NOW", false},
-	}
-
-	for _, tt := range tests {
-		got := validSources[tt.source]
-		if got != tt.valid {
-			t.Errorf("source=%q: got valid=%v, want %v", tt.source, got, tt.valid)
-		}
-	}
-}
-
-// TestBuyNowCartClearing verifies the cart-clearing logic based on source.
-// source=cart should clear cart items; source=buy_now should not.
-func TestBuyNowCartClearing(t *testing.T) {
-	tests := []struct {
-		source     string
-		shouldClear bool
-	}{
-		{"cart", true},
-		{"buy_now", false},
-	}
-
-	for _, tt := range tests {
-		shouldClear := tt.source == "cart"
-		if shouldClear != tt.shouldClear {
-			t.Errorf("source=%q: shouldClearCart=%v, want %v", tt.source, shouldClear, tt.shouldClear)
-		}
-	}
-}
-
-// TestBuyNowShippingAddressLogic verifies shipping address requirements.
-func TestBuyNowShippingAddressLogic(t *testing.T) {
-	tests := []struct {
-		name         string
-		hasShippable bool
-		hasAddress   bool
-		shouldPass   bool
-	}{
-		{"shippable with address", true, true, true},
-		{"shippable without address", true, false, false},
-		{"non-shippable with address", false, true, true},
-		{"non-shippable without address", false, false, true},
+		{
+			"single item quantity 1",
+			[]models.CreateOrderItem{{ProductID: "prod-1", Quantity: 1}},
+			1000,
+		},
+		{
+			"single item quantity 3",
+			[]models.CreateOrderItem{{ProductID: "prod-1", Quantity: 3}},
+			3000,
+		},
+		{
+			"multiple items",
+			[]models.CreateOrderItem{
+				{ProductID: "prod-1", Quantity: 2},
+				{ProductID: "prod-2", Quantity: 1},
+			},
+			4500,
+		},
+		{
+			"empty items",
+			[]models.CreateOrderItem{},
+			0,
+		},
+		{
+			"unknown product ignored",
+			[]models.CreateOrderItem{{ProductID: "unknown", Quantity: 1}},
+			0,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			addressRequired := tt.hasShippable && !tt.hasAddress
-			canProceed := !addressRequired
-			if canProceed != tt.shouldPass {
-				t.Errorf("got canProceed=%v, want %v", canProceed, tt.shouldPass)
+			got := models.OrderTotalCents(tt.items, products)
+			if got != tt.want {
+				t.Errorf("OrderTotalCents = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestBuyNowSingleItem verifies buy now always operates on a single item.
-func TestBuyNowSingleItem(t *testing.T) {
-	// Buy Now creates an order with exactly one item (one product, specified quantity)
-	type buyNowRequest struct {
-		productID string
-		quantity  int
-	}
-
+// TestBuyNowOrderCancelability verifies that only pending_payment orders
+// can be canceled — the real IsOrderCancelable function used in the cancel flow.
+func TestBuyNowOrderCancelability(t *testing.T) {
 	tests := []struct {
-		name     string
-		req      buyNowRequest
-		valid    bool
+		status     string
+		cancelable bool
 	}{
-		{"valid single item", buyNowRequest{"prod-1", 1}, true},
-		{"valid quantity > 1", buyNowRequest{"prod-1", 3}, true},
-		{"zero quantity", buyNowRequest{"prod-1", 0}, false},
-		{"negative quantity", buyNowRequest{"prod-1", -1}, false},
-		{"empty product ID", buyNowRequest{"", 1}, false},
+		{"pending_payment", true},
+		{"paid", false},
+		{"processing", false},
+		{"shipped", false},
+		{"delivered", false},
+		{"completed", false},
+		{"closed", false},
+		{"refunded", false},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			valid := tt.req.productID != "" && tt.req.quantity > 0
-			if valid != tt.valid {
-				t.Errorf("got valid=%v, want %v", valid, tt.valid)
+		t.Run(tt.status, func(t *testing.T) {
+			got := models.IsOrderCancelable(tt.status)
+			if got != tt.cancelable {
+				t.Errorf("IsOrderCancelable(%q) = %v, want %v", tt.status, got, tt.cancelable)
 			}
 		})
 	}
 }
 
-// TestBuyNowCheckoutURLParams verifies the query parameter format
-// used to navigate from product detail to checkout.
-func TestBuyNowCheckoutURLParams(t *testing.T) {
+// TestBuyNowOrderRefundability verifies which order states allow refunds —
+// the real IsOrderRefundable function used in the admin refund flow.
+func TestBuyNowOrderRefundability(t *testing.T) {
 	tests := []struct {
-		name      string
-		productID string
-		qty       int
-		mode      string
+		status     string
+		refundable bool
 	}{
-		{"standard buy now", "abc-123", 1, "buy_now"},
-		{"multi-quantity", "xyz-789", 5, "buy_now"},
+		{"pending_payment", false},
+		{"paid", true},
+		{"processing", true},
+		{"shipped", true},
+		{"delivered", true},
+		{"completed", true},
+		{"closed", false},
+		{"refunded", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := models.IsOrderRefundable(tt.status)
+			if got != tt.refundable {
+				t.Errorf("IsOrderRefundable(%q) = %v, want %v", tt.status, got, tt.refundable)
+			}
+		})
+	}
+}
+
+// TestBuyNowProductAvailability verifies the real ComputeAvailability method
+// used to display stock status on the product detail / buy-now page.
+func TestBuyNowProductAvailability(t *testing.T) {
+	tests := []struct {
+		name  string
+		stock int
+		want  string
+	}{
+		{"plenty in stock", 100, "in_stock"},
+		{"exactly 11", 11, "in_stock"},
+		{"low stock boundary", 10, "low_stock"},
+		{"single remaining", 1, "low_stock"},
+		{"out of stock", 0, "out_of_stock"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The checkout page determines mode from query params:
-			// ?buy_now=PRODUCT_ID&qty=N → buy_now mode
-			// no params → cart mode
-			if tt.productID == "" {
-				t.Error("product ID cannot be empty for buy now")
-			}
-			if tt.qty < 1 {
-				t.Error("quantity must be at least 1")
-			}
-			if tt.mode != "buy_now" {
-				t.Errorf("mode = %q, want buy_now", tt.mode)
+			p := &models.Product{StockQuantity: tt.stock}
+			got := p.ComputeAvailability()
+			if got != tt.want {
+				t.Errorf("ComputeAvailability() = %q, want %q", got, tt.want)
 			}
 		})
 	}
