@@ -99,7 +99,8 @@ func (h *TicketHandler) Assign(c *gin.Context) {
 		return
 	}
 
-	code, msg := h.ticketService.AssignTicket(id, req.AssignedTo)
+	performedBy := middleware.GetUserID(c)
+	code, msg := h.ticketService.AssignTicket(id, req.AssignedTo, performedBy)
 	if code != http.StatusOK {
 		Error(c, code, msg)
 		return

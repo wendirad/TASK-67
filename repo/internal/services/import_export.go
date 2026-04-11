@@ -342,6 +342,8 @@ func validateRow(entityType string, headers, row []string, rowNum int) []Validat
 		}
 		if fields["password"] == "" {
 			errors = append(errors, ValidationError{Row: rowNum, Field: "password", Error: "Password is required"})
+		} else if ok, msg := models.ValidatePassword(fields["password"]); !ok {
+			errors = append(errors, ValidationError{Row: rowNum, Field: "password", Error: msg})
 		}
 		validRoles := map[string]bool{"member": true, "staff": true, "moderator": true}
 		if !validRoles[fields["role"]] {

@@ -18,7 +18,7 @@ A production-ready, full-stack platform for campus recreation management. Campus
 | `init-secrets` | Auto-generates cryptographic secrets on first startup | - |
 | `db` | PostgreSQL 16 database | 5432 |
 | `backend` | Go API server (migrations, admin bootstrap, REST API) | 8080 |
-| `worker` | Background job scheduler (seat release, waitlist, archiver) | - |
+| `worker` | Background job scheduler (11 scheduled jobs) | - |
 | `frontend` | Nginx reverse proxy serving HTML pages | 3000 |
 | `test-runner` | Go test container (test profile only) | - |
 
@@ -75,8 +75,8 @@ This single command:
 
 1. **init-secrets** generates cryptographic secrets (`db_password`, `jwt_secret`, `admin_bootstrap_password`, `wechat_merchant_key`, `backup_encryption_key`) into a shared Docker volume
 2. **db** starts PostgreSQL and waits until healthy
-3. **backend** loads secrets from the volume, runs all 23 database migrations, bootstraps the admin user, and starts the API server
-4. **worker** starts background jobs (seat release, waitlist processing, data archiving)
+3. **backend** loads secrets from the volume, runs all database migrations, bootstraps the admin user, and starts the API server
+4. **worker** starts 11 background jobs (waitlist promotion, order closing, no-show detection, SLA checking, job processing, archiving, backups, and more)
 5. **frontend** starts Nginx, proxying to the backend
 
 ### Access the Application
@@ -206,8 +206,8 @@ All API responses follow the format `{"code": <int>, "msg": "<string>", "data": 
 | POST | `/api/moderation/posts/:id/decision` | Approve/reject post |
 | PUT | `/api/tickets/:id/assign` | Assign ticket |
 | PUT | `/api/tickets/:id/status` | Update ticket status |
-| POST | `/api/import` | Import data (CSV/JSON) |
-| GET | `/api/export` | Export data |
+| POST | `/api/import` | Import data (CSV/XLSX) |
+| GET | `/api/export` | Export data (CSV/XLSX) |
 | GET | `/api/jobs/:id` | Check import/export job status |
 
 ### Admin Only
@@ -281,15 +281,23 @@ All API responses follow the format `{"code": <int>, "msg": "<string>", "data": 
 
 The worker service runs scheduled jobs using PostgreSQL advisory locks for distributed safety:
 
-| Job | Lock ID | Interval | Description |
-|-----|---------|----------|-------------|
-| Seat Release | 101 | 2 min | Releases unconfirmed seats after expiry window |
-| Waitlist Processor | 102 | 5 min | Promotes waitlisted members when seats become available |
-| Archiver | 107 | 24 hr | Archives orders/tickets older than 24 months with PII masking |
+| Job | Interval | Description |
+|-----|----------|-------------|
+| Waitlist Promoter | 10s | Promotes waitlisted members when seats become available |
+| Order Closer | 30s | Closes unpaid orders after payment deadline |
+| No-Show Detector | 30s | Detects no-shows for checked-in sessions |
+| Break Overrun Detector | 15s | Flags breaks exceeding allowed duration |
+| Session Status Updater | 60s | Updates session statuses based on schedule |
+| SLA Checker | 5 min | Checks ticket SLA response/resolution deadlines |
+| Job Processor | 5s | Processes queued import/export jobs |
+| Archiver | 24 hr | Archives orders/tickets older than 24 months with PII masking |
+| Backup Executor | 10s | Executes pending backup requests |
+| Daily Backup | 24 hr | Triggers automatic daily database backup |
+| Occupancy Anomaly Detector | 60s | Detects anomalous facility occupancy levels |
 
 ## Database
 
-- **PostgreSQL 16** with 23 migration files applied in order on startup
+- **PostgreSQL 16** with 26 migration files applied in order on startup
 - Tables: `users`, `facilities`, `sessions`, `seats`, `registrations`, `waitlist`, `products`, `addresses`, `cart_items`, `orders`, `order_items`, `payments`, `invoices`, `checkins`, `shipping`, `posts`, `moderation_decisions`, `tickets`, `ticket_comments`, `audit_logs`, `config`, `jobs`, `files`, `backups`
 - Archive schema: `archive.orders`, `archive.order_items`, `archive.payments`, `archive.audit_logs`, `archive.tickets`, `archive.ticket_comments`
 - Advisory locks used for worker job coordination (`FOR UPDATE SKIP LOCKED`)
@@ -304,7 +312,7 @@ The worker service runs scheduled jobs using PostgreSQL advisory locks for distr
 - Structured JSON error responses (no stack traces or internal details exposed)
 - Rate limiting on API requests
 - CORS middleware configured
-- HTTP-only cookies for session tokens
+- HTTP-only, Secure cookies for session tokens (Secure flag configurable via `COOKIE_SECURE` env var)
 - SQL injection prevention via parameterized queries
 - XSS prevention via Go template auto-escaping
 

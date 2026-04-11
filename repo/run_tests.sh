@@ -39,6 +39,7 @@ echo "Database is ready."
 echo ""
 echo "--- Starting backend and worker ---"
 export RATE_LIMIT_PER_MINUTE=10000
+export COOKIE_SECURE=false
 docker compose up -d backend worker
 echo "Waiting for backend to be ready..."
 RETRIES=30

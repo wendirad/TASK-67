@@ -27,6 +27,7 @@ type Config struct {
 	WALArchivePath      string
 
 	AllowedOrigins []string
+	CookieSecure   bool
 }
 
 func Load() (*Config, error) {
@@ -58,6 +59,7 @@ func Load() (*Config, error) {
 		WALArchivePath:      getEnv("WAL_ARCHIVE_PATH", "/wal_archive"),
 
 		AllowedOrigins: parseOrigins(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
+		CookieSecure:   getEnv("COOKIE_SECURE", "true") == "true",
 	}
 
 	if cfg.DBPassword == "" {

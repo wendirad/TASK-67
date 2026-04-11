@@ -257,7 +257,7 @@ func (r *BackupRepository) ArchiveOrders(cutoffMonths int, batchLimit int) (int,
 }
 
 func (r *BackupRepository) archiveOrderTx(tx *sql.Tx, orderID string, archiveTime time.Time) error {
-	// Copy order to archive with PII masking
+	// Copy order to archive with PII masking and lookup hash
 	_, err := tx.Exec(`
 		INSERT INTO archive.orders (
 			id, order_number, user_id, status, total_cents,
@@ -266,16 +266,18 @@ func (r *BackupRepository) archiveOrderTx(tx *sql.Tx, orderID string, archiveTim
 			ship_to_line1, ship_to_line2, ship_to_city,
 			ship_to_province, ship_to_postal_code,
 			payment_deadline, paid_at, closed_at, close_reason,
-			notes, created_at, updated_at, archived_at
+			notes, created_at, updated_at, archived_at,
+			user_id_hash
 		)
 		SELECT
 			id, order_number, user_id, status, total_cents,
-			shipping_address_id,
+			NULL,
 			'ARCHIVED', NULL,
-			ship_to_line1, ship_to_line2, ship_to_city,
+			'ARCHIVED', NULL, ship_to_city,
 			ship_to_province, ship_to_postal_code,
 			payment_deadline, paid_at, closed_at, close_reason,
-			NULL, created_at, updated_at, $2
+			NULL, created_at, updated_at, $2,
+			encode(sha256(user_id::text::bytea), 'hex')
 		FROM orders WHERE id = $1
 	`, orderID, archiveTime)
 	if err != nil {
@@ -307,7 +309,7 @@ func (r *BackupRepository) archiveOrderTx(tx *sql.Tx, orderID string, archiveTim
 		)
 		SELECT
 			id, order_id, payment_method, amount_cents, status,
-			transaction_id, wechat_prepay_data, callback_signature,
+			transaction_id, NULL, NULL,
 			callback_received_at, refund_id, refunded_at,
 			created_at, updated_at, $2
 		FROM payments WHERE order_id = $1
@@ -316,7 +318,7 @@ func (r *BackupRepository) archiveOrderTx(tx *sql.Tx, orderID string, archiveTim
 		return fmt.Errorf("copy payments: %w", err)
 	}
 
-	// Copy related audit logs
+	// Copy related audit logs (mask IP address for privacy)
 	_, err = tx.Exec(`
 		INSERT INTO archive.audit_logs (
 			id, entity_type, entity_id, action,
@@ -325,7 +327,7 @@ func (r *BackupRepository) archiveOrderTx(tx *sql.Tx, orderID string, archiveTim
 		)
 		SELECT
 			id, entity_type, entity_id, action,
-			old_value, new_value, performed_by, ip_address,
+			old_value, new_value, performed_by, NULL,
 			created_at, $2
 		FROM audit_logs
 		WHERE entity_type = 'order' AND entity_id = $1
@@ -408,7 +410,7 @@ func (r *BackupRepository) ArchiveTickets(cutoffMonths int, batchLimit int) (int
 }
 
 func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveTime time.Time) error {
-	// Copy ticket to archive with PII masking on description
+	// Copy ticket to archive with PII masking and lookup hash
 	_, err := tx.Exec(`
 		INSERT INTO archive.tickets (
 			id, ticket_number, subject, description, type, priority,
@@ -416,7 +418,8 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 			sla_response_deadline, sla_resolution_deadline,
 			sla_response_met, sla_resolution_met,
 			responded_at, resolved_at, closed_at,
-			created_at, updated_at, archived_at
+			created_at, updated_at, archived_at,
+			created_by_hash
 		)
 		SELECT
 			id, ticket_number, subject, 'ARCHIVED', type, priority,
@@ -424,7 +427,8 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 			sla_response_deadline, sla_resolution_deadline,
 			sla_response_met, sla_resolution_met,
 			responded_at, resolved_at, closed_at,
-			created_at, updated_at, $2
+			created_at, updated_at, $2,
+			encode(sha256(created_by::text::bytea), 'hex')
 		FROM tickets WHERE id = $1
 	`, ticketID, archiveTime)
 	if err != nil {
@@ -444,7 +448,7 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 		return fmt.Errorf("copy ticket comments: %w", err)
 	}
 
-	// Copy related audit logs
+	// Copy related audit logs (mask IP address for privacy)
 	_, err = tx.Exec(`
 		INSERT INTO archive.audit_logs (
 			id, entity_type, entity_id, action,
@@ -453,7 +457,7 @@ func (r *BackupRepository) archiveTicketTx(tx *sql.Tx, ticketID string, archiveT
 		)
 		SELECT
 			id, entity_type, entity_id, action,
-			old_value, new_value, performed_by, ip_address,
+			old_value, new_value, performed_by, NULL,
 			created_at, $2
 		FROM audit_logs
 		WHERE entity_type = 'ticket' AND entity_id = $1

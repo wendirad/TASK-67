@@ -10,11 +10,12 @@ import (
 )
 
 type AuthHandler struct {
-	authService *services.AuthService
+	authService  *services.AuthService
+	cookieSecure bool
 }
 
-func NewAuthHandler(authService *services.AuthService) *AuthHandler {
-	return &AuthHandler{authService: authService}
+func NewAuthHandler(authService *services.AuthService, cookieSecure bool) *AuthHandler {
+	return &AuthHandler{authService: authService, cookieSecure: cookieSecure}
 }
 
 type loginRequest struct {
@@ -40,7 +41,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("session_token", result.Token, 86400, "/", "", false, true)
+	c.SetCookie("session_token", result.Token, 86400, "/", "", h.cookieSecure, true)
 
 	Success(c, http.StatusOK, "Login successful", gin.H{
 		"token": result.Token,
@@ -54,7 +55,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("session_token", "", -1, "/", "", false, true)
+	c.SetCookie("session_token", "", -1, "/", "", h.cookieSecure, true)
 	Success(c, http.StatusOK, "Logged out successfully", nil)
 }
 

@@ -164,7 +164,7 @@ func runServe(cfg *config.Config) {
 	paymentService := services.NewPaymentService(orderRepo, auditRepo, cfg.WeChatMerchantKey)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(authService)
+	authHandler := handlers.NewAuthHandler(authService, cfg.CookieSecure)
 	adminUserHandler := handlers.NewAdminUserHandler(userService)
 	addressHandler := handlers.NewAddressHandler(addressService)
 	adminFacilityHandler := handlers.NewAdminFacilityHandler(facilityService)

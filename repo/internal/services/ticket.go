@@ -130,7 +130,8 @@ func (s *TicketService) GetTicket(ticketID, userID, role string) (*models.Ticket
 }
 
 // AssignTicket assigns a ticket to a staff/admin user.
-func (s *TicketService) AssignTicket(ticketID, assignedTo string) (int, string) {
+// performedBy is the authenticated user who initiated the assignment.
+func (s *TicketService) AssignTicket(ticketID, assignedTo, performedBy string) (int, string) {
 	ticket, err := s.ticketRepo.FindByID(ticketID)
 	if err != nil {
 		log.Printf("Error finding ticket %s: %v", ticketID, err)
@@ -161,10 +162,10 @@ func (s *TicketService) AssignTicket(ticketID, assignedTo string) (int, string) 
 		return 500, "Internal server error"
 	}
 
-	log.Printf("Ticket assigned: %s to=%s", ticket.TicketNumber, assignedTo)
+	log.Printf("Ticket assigned: %s to=%s by=%s", ticket.TicketNumber, assignedTo, performedBy)
 
 	newVal := fmt.Sprintf(`{"assigned_to":"%s"}`, assignedTo)
-	if err := s.auditRepo.Log("ticket", ticketID, "ticket_assigned", nil, &newVal, assignedTo, ""); err != nil {
+	if err := s.auditRepo.Log("ticket", ticketID, "ticket_assigned", nil, &newVal, performedBy, ""); err != nil {
 		log.Printf("Warning: failed to create audit log for ticket assignment %s: %v", ticketID, err)
 	}
 

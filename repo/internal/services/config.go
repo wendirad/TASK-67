@@ -123,13 +123,7 @@ func IsFeatureEnabled(userCohort int, featureKey string, configRepo *repository.
 	if err != nil || entry == nil {
 		return true // No config = enabled for all
 	}
-	if entry.CanaryPercentage == nil {
-		return true
-	}
-	if userCohort < 0 {
-		return false // no cohort assigned = excluded from canary
-	}
-	return userCohort < *entry.CanaryPercentage
+	return models.CanaryEnabled(entry.CanaryPercentage, userCohort)
 }
 
 // GetFeatureStatus returns the canary status for a feature for a specific user.
@@ -140,11 +134,8 @@ func (s *ConfigService) GetFeatureStatus(canaryCohort int, featureKey string) (b
 	if err != nil {
 		return false, fmt.Errorf("find feature config: %w", err)
 	}
-	if entry == nil || entry.CanaryPercentage == nil {
+	if entry == nil {
 		return true, nil
 	}
-	if canaryCohort < 0 {
-		return false, nil // no cohort assigned = excluded from canary
-	}
-	return canaryCohort < *entry.CanaryPercentage, nil
+	return models.CanaryEnabled(entry.CanaryPercentage, canaryCohort), nil
 }

@@ -25,6 +25,39 @@ type AuditLog struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// CanaryEnabled decides whether a canary-gated feature is enabled for a user.
+// canaryPct == nil means fully rolled out (enabled for everyone).
+// A negative userCohort (-1) means no cohort assigned — excluded from canary.
+// Otherwise, enabled when userCohort < *canaryPct.
+func CanaryEnabled(canaryPct *int, userCohort int) bool {
+	if canaryPct == nil {
+		return true
+	}
+	if userCohort < 0 {
+		return false
+	}
+	return userCohort < *canaryPct
+}
+
+// CanaryIntValue returns configValue when the user falls within the canary
+// rollout, defaultVal otherwise. canaryPct == nil means fully rolled out.
+// A non-positive configValue is treated as absent and returns defaultVal.
+func CanaryIntValue(canaryPct *int, userCohort, configValue, defaultVal int) int {
+	if canaryPct == nil {
+		if configValue <= 0 {
+			return defaultVal
+		}
+		return configValue
+	}
+	if userCohort < 0 || userCohort >= *canaryPct {
+		return defaultVal
+	}
+	if configValue <= 0 {
+		return defaultVal
+	}
+	return configValue
+}
+
 // AuditLogDMLAllowed returns whether the given DML operation is permitted on
 // the audit_logs table. Only INSERT is allowed; UPDATE is always blocked;
 // DELETE is only allowed after archival (enforced at DB trigger level).

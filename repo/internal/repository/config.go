@@ -117,25 +117,9 @@ func (r *ConfigRepository) GetIntForCohort(key string, defaultVal, userCohort in
 	if err != nil {
 		return defaultVal
 	}
-	// If no canary gating, value applies to all users
-	if canaryPct == nil {
-		n := 0
-		fmt.Sscanf(val, "%d", &n)
-		if n <= 0 {
-			return defaultVal
-		}
-		return n
-	}
-	// User outside canary rollout gets the default
-	if userCohort < 0 || userCohort >= *canaryPct {
-		return defaultVal
-	}
 	n := 0
 	fmt.Sscanf(val, "%d", &n)
-	if n <= 0 {
-		return defaultVal
-	}
-	return n
+	return models.CanaryIntValue(canaryPct, userCohort, n, defaultVal)
 }
 
 // ListAuditLogs returns recent audit logs for a given entity.

@@ -44,13 +44,21 @@ templ StaffShippingPage() {
 			if (res) { showAlert('success', 'Shipped'); loadShipments(1); }
 		}
 		async function deliverItem(id) {
-			const res = await api(`/api/staff/shipping/${id}/deliver`, { method: 'PUT', body: JSON.stringify({}) });
+			const proofType = prompt('Proof type (signature or acknowledgment):');
+			if (!proofType) return;
+			if (proofType !== 'signature' && proofType !== 'acknowledgment') {
+				showAlert('error', 'Proof type must be "signature" or "acknowledgment"');
+				return;
+			}
+			const proofData = prompt('Proof data' + (proofType === 'signature' ? ' (base64-encoded signature):' : ':'));
+			if (!proofData) return;
+			const res = await api(`/api/staff/shipping/${id}/deliver`, { method: 'PUT', body: JSON.stringify({ proof_type: proofType, proof_data: proofData }) });
 			if (res) { showAlert('success', 'Delivered'); loadShipments(1); }
 		}
 		async function exceptionItem(id) {
-			const reason = prompt('Exception reason:');
-			if (!reason) return;
-			const res = await api(`/api/staff/shipping/${id}/exception`, { method: 'PUT', body: JSON.stringify({ reason }) });
+			const notes = prompt('Exception reason:');
+			if (!notes) return;
+			const res = await api(`/api/staff/shipping/${id}/exception`, { method: 'PUT', body: JSON.stringify({ exception_notes: notes }) });
 			if (res) { showAlert('success', 'Exception recorded'); loadShipments(1); }
 		}
 		loadShipments(1);

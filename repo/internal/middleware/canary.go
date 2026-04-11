@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"campusrec/internal/models"
 	"campusrec/internal/repository"
 
 	"github.com/gin-gonic/gin"
@@ -64,11 +65,5 @@ func IsFeatureEnabledForRequest(c *gin.Context, featureKey string) bool {
 	if err != nil || entry == nil {
 		return true // key not found = feature on for all
 	}
-	if entry.CanaryPercentage == nil {
-		return true // no canary = on for all
-	}
-	if cohort < 0 {
-		return false // no cohort assigned = excluded from canary
-	}
-	return cohort < *entry.CanaryPercentage
+	return models.CanaryEnabled(entry.CanaryPercentage, cohort)
 }

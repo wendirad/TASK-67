@@ -2,12 +2,14 @@ package unit_tests
 
 import (
 	"testing"
+
+	"campusrec/internal/models"
 )
 
-// TestIsFeatureEnabledNegativeCohort verifies that the service-layer
-// IsFeatureEnabled correctly excludes users with no cohort assigned (cohort = -1)
-// from canary-gated features — matching the middleware's behavior.
-func TestIsFeatureEnabledNegativeCohort(t *testing.T) {
+// TestCanaryEnabledNegativeCohort verifies that models.CanaryEnabled correctly
+// excludes users with no cohort assigned (cohort = -1) from canary-gated
+// features — the same function used by the service and middleware layers.
+func TestCanaryEnabledNegativeCohort(t *testing.T) {
 	tests := []struct {
 		name      string
 		canaryPct *int
@@ -26,22 +28,20 @@ func TestIsFeatureEnabledNegativeCohort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// This tests the same decision logic used by:
-			// - services.IsFeatureEnabled (service layer)
-			// - middleware.IsFeatureEnabledForRequest (middleware)
-			// Both use: canaryPct == nil → true; cohort < 0 → false; cohort < pct → true
-			got := canaryDecision(tt.canaryPct, tt.cohort)
+			got := models.CanaryEnabled(tt.canaryPct, tt.cohort)
 			if got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("CanaryEnabled(pct=%v, cohort=%d) = %v, want %v",
+					tt.canaryPct, tt.cohort, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestIsFeatureEnabledMatchesMiddleware verifies that the service-layer
-// and middleware-layer canary decisions produce identical results for
-// all representative inputs.
-func TestIsFeatureEnabledMatchesMiddleware(t *testing.T) {
+// TestCanaryEnabledMatchesIntValue verifies that models.CanaryEnabled and
+// models.CanaryIntValue produce consistent results for all representative
+// inputs — ensuring the service-layer and repository-layer canary decisions
+// agree on who is inside vs outside the rollout.
+func TestCanaryEnabledMatchesIntValue(t *testing.T) {
 	scenarios := []struct {
 		canaryPct *int
 		cohort    int
@@ -64,24 +64,20 @@ func TestIsFeatureEnabledMatchesMiddleware(t *testing.T) {
 	}
 
 	for _, s := range scenarios {
-		// Both the middleware and service layer use the same decision:
-		// canaryPct == nil → true; cohort < 0 → false; cohort < pct → true
-		result := canaryDecision(s.canaryPct, s.cohort)
+		enabled := models.CanaryEnabled(s.canaryPct, s.cohort)
 
-		// Verify the GetIntForCohort decision is consistent:
-		// If canaryDecision returns true → user gets config value (not default)
-		// If canaryDecision returns false → user gets default value
+		// CanaryIntValue should return configValue when enabled, defaultVal otherwise
 		configVal := 42
 		defaultVal := 10
-		intResult := getIntForCohortDecision(s.canaryPct, s.cohort, configVal, defaultVal)
+		intResult := models.CanaryIntValue(s.canaryPct, s.cohort, configVal, defaultVal)
 
 		if s.canaryPct == nil {
 			// Fully rolled out: user always gets config value
 			if intResult != configVal {
-				t.Errorf("canaryPct=nil cohort=%d: GetIntForCohort should return configVal %d, got %d",
+				t.Errorf("canaryPct=nil cohort=%d: CanaryIntValue should return configVal %d, got %d",
 					s.cohort, configVal, intResult)
 			}
-		} else if result {
+		} else if enabled {
 			// Inside canary: user gets config value
 			if intResult != configVal {
 				t.Errorf("canaryPct=%d cohort=%d: inside canary but got default %d instead of config %d",
@@ -97,10 +93,10 @@ func TestIsFeatureEnabledMatchesMiddleware(t *testing.T) {
 	}
 }
 
-// TestGetFeatureStatusAcceptsCohortParam verifies GetFeatureStatus uses
-// the cohort parameter (from middleware context) rather than computing
-// its own — ensuring a single source of truth for cohort assignment.
-func TestGetFeatureStatusAcceptsCohortParam(t *testing.T) {
+// TestCanaryEnabledAcceptsCohortParam verifies that CanaryEnabled uses
+// the cohort parameter directly rather than computing its own — ensuring
+// a single source of truth for cohort assignment.
+func TestCanaryEnabledAcceptsCohortParam(t *testing.T) {
 	tests := []struct {
 		name      string
 		canaryPct *int
@@ -115,9 +111,9 @@ func TestGetFeatureStatusAcceptsCohortParam(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := canaryDecision(tt.canaryPct, tt.cohort)
+			got := models.CanaryEnabled(tt.canaryPct, tt.cohort)
 			if got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
+				t.Errorf("CanaryEnabled = %v, want %v", got, tt.want)
 			}
 		})
 	}
