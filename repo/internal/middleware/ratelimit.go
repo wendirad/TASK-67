@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -60,9 +62,16 @@ func (rl *rateLimiter) cleanup() {
 	}
 }
 
-// RateLimit applies per-IP rate limiting: 500 requests per minute.
+// RateLimit applies per-IP rate limiting. The limit defaults to 500 requests
+// per minute and can be overridden via the RATE_LIMIT_PER_MINUTE env var.
 func RateLimit() gin.HandlerFunc {
-	limiter := newRateLimiter(500, time.Minute)
+	limit := 500
+	if v := os.Getenv("RATE_LIMIT_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	limiter := newRateLimiter(limit, time.Minute)
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		if !limiter.allow(ip) {

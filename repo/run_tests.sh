@@ -35,9 +35,10 @@ until docker compose exec -T db pg_isready -U campusrec -d campusrec 2>/dev/null
 done
 echo "Database is ready."
 
-# 4. Start backend and worker
+# 4. Start backend and worker (raise rate limit for test traffic)
 echo ""
 echo "--- Starting backend and worker ---"
+export RATE_LIMIT_PER_MINUTE=10000
 docker compose up -d backend worker
 echo "Waiting for backend to be ready..."
 RETRIES=30
